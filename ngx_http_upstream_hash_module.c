@@ -1,12 +1,3 @@
-/*
- * Hash a variable to choose an upstream server.
- * 
- * Copyright (C) Evan Miller
- *
- * This module can be distributed under the same terms as Nginx itself.
- */
-
-
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
@@ -35,19 +26,13 @@ typedef struct {
 } ngx_http_upstream_hash_peer_data_t;
 
 
-static ngx_int_t ngx_http_upstream_init_hash_peer(ngx_http_request_t *r,
-    ngx_http_upstream_srv_conf_t *us);
-static ngx_int_t ngx_http_upstream_get_hash_peer(ngx_peer_connection_t *pc,
-    void *data);
-static void ngx_http_upstream_free_hash_peer(ngx_peer_connection_t *pc,
-    void *data, ngx_uint_t state);
-static char *ngx_http_upstream_hash(ngx_conf_t *cf, ngx_command_t *cmd,
-    void *conf);
-static char *ngx_http_upstream_hash_again(ngx_conf_t *cf, ngx_command_t *cmd, 
-    void *conf);
-static ngx_int_t ngx_http_upstream_init_hash(ngx_conf_t *cf, 
-    ngx_http_upstream_srv_conf_t *us);
-static ngx_uint_t ngx_http_upstream_hash_crc32(u_char *keydata, size_t keylen);
+static ngx_int_t  ngx_http_upstream_init_hash_peer (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *upstream_conf);
+static ngx_int_t  ngx_http_upstream_get_hash_peer  (ngx_peer_connection_t *pc, void *data);
+static void       ngx_http_upstream_free_hash_peer (ngx_peer_connection_t *pc, void *data, ngx_uint_t state);
+static char *     ngx_http_upstream_hash           (ngx_conf_t *conf, ngx_command_t *cmd, void *conf);
+static char *     ngx_http_upstream_hash_again     (ngx_conf_t *conf, ngx_command_t *cmd, void *conf);
+static ngx_int_t  ngx_http_upstream_init_hash      (ngx_conf_t *conf, ngx_http_upstream_srv_conf_t *upstream_conf);
+static ngx_uint_t ngx_http_upstream_hash_crc32     (u_char *keydata, size_t keylen);
 
 
 static ngx_command_t  ngx_http_upstream_hash_commands[] = {
@@ -69,58 +54,54 @@ static ngx_command_t  ngx_http_upstream_hash_commands[] = {
 };
 
 
-static ngx_http_module_t  ngx_http_upstream_hash_module_ctx = {
-    NULL,                                  /* preconfiguration */
-    NULL,                                  /* postconfiguration */
+static ngx_http_module_t  ngx_http_upstream_hash_module_ctx = 
+  { NULL /* preconfiguration */
+  , NULL /* postconfiguration */ 
+  , NULL /* create main configuration */
+  , NULL /* init main configuration */
+  , NULL /* create server configuration */
+  , NULL /* merge server configuration */
+  , NULL /* create location configuration */
+  , NULL /* merge location configuration */
+  };
 
-    NULL,                                  /* create main configuration */
-    NULL,                                  /* init main configuration */
-
-    NULL,                                  /* create server configuration */
-    NULL,                                  /* merge server configuration */
-
-    NULL,                                  /* create location configuration */
-    NULL                                   /* merge location configuration */
-};
-
-
-ngx_module_t  ngx_http_upstream_hash_module = {
-    NGX_MODULE_V1,
-    &ngx_http_upstream_hash_module_ctx,    /* module context */
-    ngx_http_upstream_hash_commands,       /* module directives */
-    NGX_HTTP_MODULE,                       /* module type */
-    NULL,                                  /* init master */
-    NULL,                                  /* init module */
-    NULL,                                  /* init process */
-    NULL,                                  /* init thread */
-    NULL,                                  /* exit thread */
-    NULL,                                  /* exit process */
-    NULL,                                  /* exit master */
-    NGX_MODULE_V1_PADDING
-};
+ngx_module_t  ngx_http_upstream_hash_module = 
+  { NGX_MODULE_V1 
+  , &ngx_http_upstream_hash_module_ctx /* module context */
+  , ngx_http_upstream_hash_commands    /* module directives */
+  , NGX_HTTP_MODULE                    /* module type */
+  , NULL                               /* init master */
+  , NULL                               /* init module */
+  , NULL                               /* init process */
+  , NULL                               /* init thread */
+  , NULL                               /* exit thread */
+  , NULL                               /* exit process */
+  , NULL                               /* exit master */
+  , NGX_MODULE_V1_PADDING
+  };
 
 
 static ngx_int_t
-ngx_http_upstream_init_hash(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *us)
+ngx_http_upstream_init_hash(ngx_conf_t *conf, ngx_http_upstream_srv_conf_t *upstream_conf)
 {
     ngx_uint_t                       i, j, n;
     ngx_http_upstream_server_t      *server;
     ngx_http_upstream_hash_peers_t  *peers;
 
-    us->peer.init = ngx_http_upstream_init_hash_peer;
+    upstream_conf->peer.init = ngx_http_upstream_init_hash_peer;
 
-    if (!us->servers) {
+    if (!upstream_conf->servers) {
 
         return NGX_ERROR;
     }
 
-    server = us->servers->elts;
+    server = upstream_conf->servers->elts;
 
-    for (n = 0, i = 0; i < us->servers->nelts; i++) {
+    for (n = 0, i = 0; i < upstream_conf->servers->nelts; i++) {
         n += server[i].naddrs;
     }
 
-    peers = ngx_pcalloc(cf->pool, sizeof(ngx_http_upstream_hash_peers_t)
+    peers = ngx_pcalloc(conf->pool, sizeof(ngx_http_upstream_hash_peers_t)
             + sizeof(ngx_http_upstream_hash_peer_t) * n);
 
     if (peers == NULL) {
@@ -130,7 +111,7 @@ ngx_http_upstream_init_hash(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *us)
     peers->number = n;
 
     /* one hostname can have multiple IP addresses in DNS */
-    for (n = 0, i = 0; i < us->servers->nelts; i++) {
+    for (n = 0, i = 0; i < upstream_conf->servers->nelts; i++) {
         for (j = 0; j < server[i].naddrs; j++, n++) {
             peers->peer[n].sockaddr = server[i].addrs[j].sockaddr;
             peers->peer[n].socklen = server[i].addrs[j].socklen;
@@ -138,7 +119,7 @@ ngx_http_upstream_init_hash(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *us)
         }
     }
 
-    us->peer.data = peers;
+    upstream_conf->peer.data = peers;
 
     return NGX_OK;
 }
@@ -146,19 +127,19 @@ ngx_http_upstream_init_hash(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *us)
 
 static ngx_int_t
 ngx_http_upstream_init_hash_peer(ngx_http_request_t *r,
-    ngx_http_upstream_srv_conf_t *us)
+    ngx_http_upstream_srv_conf_t *upstream_conf)
 {
     ngx_http_upstream_hash_peer_data_t     *uhpd;
     
     ngx_str_t val;
 
-    if (ngx_http_script_run(r, &val, us->lengths, 0, us->values) == NULL) {
+    if (ngx_http_script_run(r, &val, upstream_conf->lengths, 0, upstream_conf->values) == NULL) {
         return NGX_ERROR;
     }
 
     uhpd = ngx_pcalloc(r->pool, sizeof(ngx_http_upstream_hash_peer_data_t)
             + sizeof(uintptr_t) * 
-                ((ngx_http_upstream_hash_peers_t *)us->peer.data)->number / 
+                ((ngx_http_upstream_hash_peers_t *)upstream_conf->peer.data)->number / 
                     (8 * sizeof(uintptr_t)));
     if (uhpd == NULL) {
         return NGX_ERROR;
@@ -166,11 +147,11 @@ ngx_http_upstream_init_hash_peer(ngx_http_request_t *r,
 
     r->upstream->peer.data = uhpd;
 
-    uhpd->peers = us->peer.data;
+    uhpd->peers = upstream_conf->peer.data;
 
     r->upstream->peer.free = ngx_http_upstream_free_hash_peer;
     r->upstream->peer.get = ngx_http_upstream_get_hash_peer;
-    r->upstream->peer.tries = us->retries + 1;
+    r->upstream->peer.tries = upstream_conf->retries + 1;
 
     /* must be big enough for the retry keys */
     if ((uhpd->current_key.data = ngx_pcalloc(r->pool, NGX_ATOMIC_T_LEN + val.len)) == NULL) {
@@ -257,54 +238,54 @@ ngx_http_upstream_hash_crc32(u_char *keydata, size_t keylen)
 }
 
 static char *
-ngx_http_upstream_hash(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_upstream_hash(ngx_conf_t *conf, ngx_command_t *cmd, void *conf)
 {
-    ngx_http_upstream_srv_conf_t  *uscf;
-    ngx_http_script_compile_t      sc;
+    ngx_http_upstream_srv_conf_t  *upstream_conf;
+    ngx_http_script_compile_t      script_compile;
     ngx_str_t                     *value;
     ngx_array_t                   *vars_lengths, *vars_values;
 
-    value = cf->args->elts;
+    value = conf->args->elts;
 
-    ngx_memzero(&sc, sizeof(ngx_http_script_compile_t));
+    ngx_memzero(&script_compile, sizeof(ngx_http_script_compile_t));
 
     vars_lengths = NULL;
     vars_values = NULL;
 
-    sc.cf = cf;
-    sc.source = &value[1];
-    sc.lengths = &vars_lengths;
-    sc.values = &vars_values;
-    sc.complete_lengths = 1;
-    sc.complete_values = 1;
+    script_compile.cf = conf;
+    script_compile.source = &value[1];
+    script_compile.lengths = &vars_lengths;
+    script_compile.values = &vars_values;
+    script_compile.complete_lengths = 1;
+    script_compile.complete_values = 1;
 
-    if (ngx_http_script_compile(&sc) != NGX_OK) {
+    if (ngx_http_script_compile(&script_compile) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
 
-    uscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_upstream_module);
+    upstream_conf = ngx_http_conf_get_module_srv_conf(conf, ngx_http_upstream_module);
 
-    uscf->peer.init_upstream = ngx_http_upstream_init_hash;
+    upstream_conf->peer.init_upstream = ngx_http_upstream_init_hash;
 
-    uscf->flags = NGX_HTTP_UPSTREAM_CREATE;
+    upstream_conf->flags = NGX_HTTP_UPSTREAM_CREATE;
 
-    uscf->values = vars_values->elts;
-    uscf->lengths = vars_lengths->elts;
+    upstream_conf->values = vars_values->elts;
+    upstream_conf->lengths = vars_lengths->elts;
 
     return NGX_CONF_OK;
 }
 
 static char *
-ngx_http_upstream_hash_again(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_upstream_hash_again(ngx_conf_t *conf, ngx_command_t *cmd, void *conf)
 {
-    ngx_http_upstream_srv_conf_t  *uscf;
+    ngx_http_upstream_srv_conf_t  *upstream_conf;
     ngx_int_t n;
 
     ngx_str_t *value;
 
-    uscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_upstream_module);
+    upstream_conf = ngx_http_conf_get_module_srv_conf(conf, ngx_http_upstream_module);
 
-    value = cf->args->elts;
+    value = conf->args->elts;
 
     n = ngx_atoi(value[1].data, value[1].len);
 
@@ -312,7 +293,7 @@ ngx_http_upstream_hash_again(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "invalid number";
     }
 
-    uscf->retries = n;
+    upstream_conf->retries = n;
 
     return NGX_CONF_OK;
 }
