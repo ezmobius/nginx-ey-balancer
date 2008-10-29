@@ -10,7 +10,7 @@ nginx_compile: max_connections_module.c
 	cd $(NGINX_DIR) && make && make install
 
 nginx_restart:
-	killall nginx
-	$(NGINX_DIR)/objs/nginx -c $(THIS_DIR)/nginx/conf/nginx.conf
+	-killall nginx
+	$(NGINX_DIR)/objs/nginx -c $(THIS_DIR)/t/nginx.conf
 	@echo *** NGINX restarted
 	ps -HC nginx -o pid,cmd
