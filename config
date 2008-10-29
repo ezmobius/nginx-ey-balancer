@@ -1,3 +1,3 @@
-ngx_addon_name=ngx_http_upstream_hash_module
-HTTP_MODULES="$HTTP_MODULES ngx_http_upstream_hash_module"
-NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_upstream_hash_module.c"
+ngx_addon_name=max_connections_module
+HTTP_MODULES="$HTTP_MODULES max_connections_module"
+NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/max_connections_module.c"
