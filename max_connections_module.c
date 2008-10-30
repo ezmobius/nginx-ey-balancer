@@ -13,8 +13,8 @@
 
 typedef struct {
   ngx_uint_t max_connections;
-  ngx_queue_t                        waiting_requests;
-  ngx_array_t                       *backends; /* backend servers */
+  ngx_queue_t waiting_requests;
+  ngx_array_t *backends; /* backend servers */
 } max_connections_srv_conf_t;
 
 typedef struct {
@@ -102,7 +102,7 @@ max_connections_dispatch_new_connection (max_connections_srv_conf_t *maxconn_cf)
 static max_connections_backend_t*
 max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf)
 {
-  ngx_uint_t i, min_connections = 0, min_upstream_index = 0;
+  ngx_uint_t i, min_connections = 10000, min_upstream_index = 0;
   
   max_connections_backend_t *backends = maxconn_cf->backends->elts;
   for(i = 0; i < maxconn_cf->backends->nelts; i++) {
@@ -114,9 +114,13 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf)
 
   assert(min_connections <= maxconn_cf->max_connections);
 
+  max_connections_backend_t *choosen = &backends[min_upstream_index];
+
   if(min_connections == maxconn_cf->max_connections) 
     /* no open slots */
     return NULL;
+
+  assert(choosen->connections < maxconn_cf->max_connections);
 
   return &backends[min_upstream_index];
 }
@@ -195,14 +199,16 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
 static ngx_int_t
 max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *uscf)
 {
-  ngx_log_debug0( NGX_LOG_DEBUG_HTTP
-                , r->connection->log
-                , 0
-                , "max_connections_peer_init"
-                );
 
   max_connections_srv_conf_t *maxconn_cf = 
     ngx_http_conf_upstream_srv_conf(uscf, max_connections_module);
+
+  ngx_log_debug0( NGX_LOG_DEBUG_HTTP
+                , r->connection->log
+                , 0
+                , "max_connections_peer_init max connections %ui"
+                , maxconn_cf->max_connections
+                );
 
   max_connections_peer_data_t *peer_data = 
     ngx_palloc(r->pool, sizeof(max_connections_peer_data_t));
@@ -219,6 +225,12 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
   r->upstream->peer.data = peer_data;
 
   if(max_connections_find_open_upstream(maxconn_cf) == NULL) {
+    ngx_log_debug1( NGX_LOG_DEBUG_HTTP
+                  , r->connection->log
+                  , 0
+                  , "max_connections queue request %p"
+                  , r
+                  );
     ngx_queue_insert_head(&maxconn_cf->waiting_requests, &peer_data->queue);
     return NGX_BUSY;
   }
@@ -245,27 +257,26 @@ max_connections_init(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *uscf)
   for (i = 0; i < uscf->servers->nelts; i++) 
       number_backends += server[i].naddrs;
 
-  ngx_array_t *backends_array = 
+  ngx_array_t *backends = 
     ngx_array_create(cf->pool, number_backends, sizeof(max_connections_backend_t));
-
-  if (backends_array == NULL) return NGX_ERROR;
-  max_connections_backend_t *backends = backends_array->elts;
+  if (backends == NULL) return NGX_ERROR;
 
   /* one hostname can have multiple IP addresses in DNS */
   ngx_uint_t n;
   for (n = 0, i = 0; i < uscf->servers->nelts; i++) {
     for (j = 0; j < server[i].naddrs; j++, n++) {
-      backends[n].sockaddr     = server[i].addrs[j].sockaddr;
-      backends[n].socklen      = server[i].addrs[j].socklen;
-      backends[n].name         = &(server[i].addrs[j].name);
-      backends[n].max_fails    = server[i].max_fails;
-      backends[n].fail_timeout = server[i].fail_timeout;
-      backends[n].down         = server[i].down;
-      backends[n].weight       = server[i].down ? 0 : server[i].weight;
-      backends[n].connections  = 0;
+      max_connections_backend_t *backend = ngx_array_push(backends);
+      backend->sockaddr     = server[i].addrs[j].sockaddr;
+      backend->socklen      = server[i].addrs[j].socklen;
+      backend->name         = &(server[i].addrs[j].name);
+      backend->max_fails    = server[i].max_fails;
+      backend->fail_timeout = server[i].fail_timeout;
+      backend->down         = server[i].down;
+      backend->weight       = server[i].down ? 0 : server[i].weight;
+      backend->connections  = 0;
     }
   }
-  maxconn_cf->backends = backends_array;
+  maxconn_cf->backends = backends;
 
   ngx_log_debug1( NGX_LOG_DEBUG_HTTP
                 , cf->log
