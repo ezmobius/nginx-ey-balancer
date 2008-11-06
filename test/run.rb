@@ -1,35 +1,97 @@
+#!/usr/bin/env ruby 
 
+class String
+  def /(x)
+    File.join(self, x)
+  end
+end
+
+DIR = File.dirname(__FILE__) / ".."
 NGINX_PORT = 8000
 NUMBER_OF_BACKENDS = 4
-REQ_PER_BACKEND = 500
+REQ_PER_BACKEND = 100
+NGINX_BIN = DIR / ".nginx/sbin/nginx"
+BACKEND_BIN = DIR / "test/upstream.rb"
+LOGDIR  = DIR / "test/log"
 
 def shutdown
+  puts "killing nginx"
   %x{pkill -f nginx}
+  puts "killing test mongrels"
   %x{pkill -f maxconn_mongrel}
 end
 
-NUMBER_OF_BACKENDS.times do |i|
-  port = NGINX_PORT + i
-  %x{ruby maxconn/upstream.rb #{port} > maxconn/log/mongrel_#{port}.log &}
+def each_backend
+  NUMBER_OF_BACKENDS.times do |i|
+    port = NGINX_PORT + 1 + i
+    logfile = LOGDIR / "mongrel_#{port}.log"
+    yield port, logfile
+  end
 end
 
-%x{$NGINX_BIN -c maxconn/nginx.conf}
+begin
+  each_backend do |port, logfile|
+    %x{ruby #{BACKEND_BIN} #{port} > #{logfile} &}
+    sleep 1
+  end
 
-total_requests = REQ_PER_BACKEND*NUMBER_OF_BACKENDS
-out = %x{ab -c 50 -n #{total_requests}  http://localhost:#{NGINX_PORT}/sleep/}
-if $?.exitstatus != 0 
+  %x{#{NGINX_BIN} -c #{DIR / "test/nginx.conf"}}
+  sleep 1 
+
+
+  total_requests = REQ_PER_BACKEND*NUMBER_OF_BACKENDS
+  out = %x{ab -c 50 -n #{total_requests}  http://localhost:#{NGINX_PORT}/sleep/}
+  if $?.exitstatus != 0 
+    $stderr.puts "ab failed"
+    $stderr.puts out
+    exit 1
+  end
+
+  unless out =~ /Complete requests:\ *(\d+)/
+    $stderr.puts "ab failed"
+    $stderr.puts out
+    exit 1
+  end
+
+  complete_requests = $1.to_i
+
+  if complete_requests != total_requests
+    $stderr.puts "only had #{complete_requests} of #{total_requests}"
+    exit 1
+  end
+
+
+  each_backend do |port, logfile|
+    last_report = %x{tail -n1 #{logfile}}
+    unless last_report =~ /max:(\d+) total:(\d+)/
+      puts "unknown report #{last_report.inspect} for #{port} backend."
+      exit 1
+    end
+
+    maxconn = $1.to_i 
+    total_requests = $2.to_i
+
+    if maxconn != 2
+      puts "on backend #{port}, max connection should be 2 but was #{maxconn}"
+      exit 1
+    end
+
+    if total_requests != REQ_PER_BACKEND
+      puts "on backend #{port}, #{total_requests} were recieved but should be #{REQ_PER_BACKEND}"
+      puts "unbalanced."
+      exit 1
+    end
+  end
+
+  # check out the logs
+  # to make sure the maxconn was correct
+  #
+  #
+  # should also test to see if the requests were evenly distributed across
+  # the mongrels.
+  # each should have recieved about REQ_PER_BACKEND
+
+  puts "okay!"
+ensure
   shutdown
-  $stderr.puts "ab failed"
-  exit 1
 end
-# check that out shows that there were total_requests successful.
-
-
-# check out the logs
-# to make sure the maxconn was correct
-#
-#
-# should also test to see if the requests were evenly distributed across
-# the mongrels.
-# each should have recieved about REQ_PER_BACKEND
-
