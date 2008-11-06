@@ -1,18 +1,22 @@
 #!/usr/bin/env ruby 
 
+require 'erb'
+
 class String
   def /(x)
-    File.join(self, x)
+    File.expand_path(File.join(self, x))
   end
 end
 
-DIR = File.dirname(__FILE__) / ".."
+DIR = File.dirname(__FILE__) 
 NGINX_PORT = 8000
 NUMBER_OF_BACKENDS = 4
 REQ_PER_BACKEND = 100
-NGINX_BIN = DIR / ".nginx/sbin/nginx"
-BACKEND_BIN = DIR / "test/upstream.rb"
-LOGDIR  = DIR / "test/log"
+NGINX_BIN = DIR / "../.nginx/sbin/nginx"
+BACKEND_BIN = DIR / "upstream.rb"
+
+TMPDIR  = DIR / "tmp"
+NGINX_CONF_TEMPLATE = DIR / "nginx.conf.erb"
 
 def shutdown
   puts "killing nginx"
@@ -24,18 +28,29 @@ end
 def each_backend
   NUMBER_OF_BACKENDS.times do |i|
     port = NGINX_PORT + 1 + i
-    logfile = LOGDIR / "mongrel_#{port}.log"
+    logfile = TMPDIR / "mongrel_#{port}.log"
     yield port, logfile
   end
 end
 
+
 begin
+  nginx_conf_template = ERB.new( File.read( NGINX_CONF_TEMPLATE ) )
+  nginx_conf_file = TMPDIR / "nginx.conf"
+  nginx_log = TMPDIR / "nginx.log"
+  nginx_port = NGINX_PORT
+  max_connections = 2
+  File.open(nginx_conf_file, "w+") do |f|
+    f.write nginx_conf_template.result(binding)
+  end
+
+
   each_backend do |port, logfile|
     %x{ruby #{BACKEND_BIN} #{port} > #{logfile} &}
     sleep 1
   end
 
-  %x{#{NGINX_BIN} -c #{DIR / "test/nginx.conf"}}
+  %x{#{NGINX_BIN} -c #{nginx_conf_file}}
   sleep 1 
 
 

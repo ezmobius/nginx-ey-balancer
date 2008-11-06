@@ -1,22 +1,21 @@
 # compile nginx --with-debug
-error_log /home/ryan/projects/maxconn/test/log/nginx.log debug;
+error_log <%= nginx_log %> debug;
 
 events { }
 
 http {
   default_type  application/octet-stream;
-  access_log /home/ryan/projects/maxconn/test/log/nginx.log;
+  access_log <%= nginx_log %>;
 
   upstream backend {
-    server localhost:8001;
-    server localhost:8002;
-    server localhost:8003;
-    server localhost:8004;
-    max_connections 2;
+    <% each_backend do |port, logfile| %>
+      server localhost:<%= port %>;
+    <% end %>
+    max_connections <%= max_connections %>;
   }
 
   server {
-    listen 8000;
+    listen <%= nginx_port %>;
     location / { 
       proxy_set_header Host $http_host;
       proxy_set_header X-Real-IP $remote_addr;

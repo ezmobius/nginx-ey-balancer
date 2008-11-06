@@ -3,11 +3,21 @@ THIS_DIR  = $(shell pwd)
 
 default: compile
 
-configure: .nginx/sbin/nginx
+configure: 
 	cd $(NGINX_DIR) && ./configure --with-debug --add-module=$(THIS_DIR) --prefix=$(THIS_DIR)/.nginx
 
-compile: max_connections_module.c
+compile: .nginx/sbin/nginx
+
+.nginx/sbin/nginx: max_connections_module.c
 	cd $(NGINX_DIR) && make && make install
+
+.PHONY: test clean restart
+
+test: test/run.rb test/nginx.conf.erb
+	ruby test/run.rb
+
+clean:
+	rm -rf .nginx
 
 restart:
 	-killall nginx
