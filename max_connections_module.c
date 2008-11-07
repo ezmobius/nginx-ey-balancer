@@ -106,6 +106,7 @@ max_connections_dispatch_new_connection (max_connections_srv_conf_t *maxconn_cf)
 
 static ngx_uint_t max_connections_rr_index;
 
+
 static max_connections_backend_t*
 max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_int_t rotate)
 {
@@ -146,6 +147,11 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
   return choosen;
 }
 
+#define max_connections_upstreams_occupied(maxconn_cf) \
+  (max_connections_find_open_upstream (maxconn_cf, 0) == NULL)
+
+#define max_connections_find_rotate_upstream(maxconn_cf) \
+  max_connections_find_open_upstream (maxconn_cf, 1)
 
 static void
 max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t state)
@@ -208,7 +214,8 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
   pc->connection = NULL;
   */
 
-  max_connections_backend_t *backend = max_connections_find_open_upstream(maxconn_cf, 1);
+  max_connections_backend_t *backend = 
+    max_connections_find_rotate_upstream(maxconn_cf);
   assert(backend != NULL && "should always be an availible backend in max_connections_peer_get()");
   assert(backend->connections < maxconn_cf->max_connections);
 
@@ -258,7 +265,7 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
   r->upstream->peer.tries = 1;
   r->upstream->peer.data = peer_data;
 
-  if(max_connections_find_open_upstream(maxconn_cf, 0) == NULL) {
+  if(max_connections_upstreams_occupied(maxconn_cf)) {
     ngx_log_debug1( NGX_LOG_DEBUG_HTTP
                   , r->connection->log
                   , 0
