@@ -10,13 +10,14 @@ end
 
 DIR = File.dirname(__FILE__) 
 NGINX_PORT = 8000
-NUMBER_OF_BACKENDS = 4
+NUMBER_OF_BACKENDS = 10 
 REQ_PER_BACKEND = 100
 NGINX_BIN = DIR / "../.nginx/sbin/nginx"
 BACKEND_BIN = DIR / "upstream.rb"
-
+MAX_CONNECTIONS = 3
 TMPDIR  = DIR / "tmp"
 NGINX_CONF_TEMPLATE = DIR / "nginx.conf.erb"
+NGINX_CONF_FILE = TMPDIR / "nginx.conf"
 
 def shutdown
   puts "killing nginx"
@@ -36,22 +37,24 @@ end
 
 begin
   nginx_conf_template = ERB.new( File.read( NGINX_CONF_TEMPLATE ) )
-  nginx_conf_file = TMPDIR / "nginx.conf"
   nginx_log = TMPDIR / "nginx.log"
   nginx_port = NGINX_PORT
-  max_connections = 2
-  File.open(nginx_conf_file, "w+") do |f|
+  max_connections = MAX_CONNECTIONS
+  File.open(NGINX_CONF_FILE, "w+") do |f|
     f.write nginx_conf_template.result(binding)
   end
 
 
   each_backend do |port, logfile|
+    %x{rm #{logfile}}
     %x{ruby #{BACKEND_BIN} #{port} > #{logfile} &}
     sleep 1
   end
 
-  %x{#{NGINX_BIN} -c #{nginx_conf_file}}
-  sleep 1 
+  # remove old log file.
+  %x{rm #{nginx_log}}
+  %x{#{NGINX_BIN} -c #{NGINX_CONF_FILE}}
+  sleep 2 
 
 
   total_requests = REQ_PER_BACKEND*NUMBER_OF_BACKENDS
@@ -86,7 +89,7 @@ begin
     maxconn = $1.to_i 
     total_requests = $2.to_i
 
-    if maxconn != 2
+    if maxconn != MAX_CONNECTIONS
       puts "on backend #{port}, max connection should be 2 but was #{maxconn}"
       exit 1
     end

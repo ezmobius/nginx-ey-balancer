@@ -13,8 +13,8 @@ compile: .nginx/sbin/nginx
 
 .PHONY: test clean restart
 
-test: test/run.rb test/nginx.conf.erb
-	ruby test/run.rb
+test: test/run.rb test/nginx.conf.erb .nginx/sbin/nginx
+	time ruby test/run.rb
 
 clean:
 	rm -rf .nginx

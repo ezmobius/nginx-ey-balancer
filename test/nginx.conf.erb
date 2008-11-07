@@ -3,6 +3,8 @@ error_log <%= nginx_log %> debug;
 
 events { }
 
+worker_processes 1;
+
 http {
   default_type  application/octet-stream;
   access_log <%= nginx_log %>;
