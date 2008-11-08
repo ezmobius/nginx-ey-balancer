@@ -1,29 +1,25 @@
-# compile nginx --with-debug
-error_log <%= nginx_log %> debug;
-
+error_log <%= logfile %> debug;
 events { }
-
-worker_processes 1;
+worker_processes <%= worker_processes %>;
 
 http {
   default_type  application/octet-stream;
-  access_log <%= nginx_log %>;
+  access_log <%= logfile %>;
 
   upstream backend {
-    <% each_backend do |port, logfile| %>
-      server localhost:<%= port %>;
-    <% end %>
+  <% backends.each do |backend| %>
+    server localhost:<%= backend.port %>;
+  <% end %>
     max_connections <%= max_connections %>;
   }
 
   server {
-    listen <%= nginx_port %>;
+    listen <%= port %>;
     location / { 
       proxy_set_header Host $http_host;
       proxy_set_header X-Real-IP $remote_addr;
       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;           
       proxy_redirect off;
-
       proxy_pass http://backend; 
     }
   }

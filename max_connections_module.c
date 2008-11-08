@@ -209,7 +209,7 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
                 , "max_connections_peer_get try %ui"
                 , pc->tries
                 );
-  /* do i need this?
+  /* XXX do i need this?
   pc->cached = 0;
   pc->connection = NULL;
   */
