@@ -47,7 +47,7 @@ module MaxconnTest
       File.unlink(logfile) if File.exists? logfile 
       @pid = fork do 
         File.open(logfile, "w+") do |f|
-          $stderr.puts "Running at http://localhost:#{port}"
+          $stderr.puts "Mongrel running on #{port}"
           app = MaxconnTest::UpstreamApplication.new(f)
           Thread.new(app) do |a|
             loop do 
@@ -102,6 +102,8 @@ module MaxconnTest
           socket = TCPSocket.open("localhost", port)
           return
         rescue Errno::ECONNREFUSED
+          $stderr.print "."
+          $stderr.flush
           sleep 0.1
         end
       end
@@ -116,6 +118,7 @@ module MaxconnTest
       File.unlink(logfile) if File.exists? logfile
       %x{#{NGINX_BIN} -c #{conffile}} 
       wait_for_server_to_open_on port
+      $stderr.puts "nginx running on #{port}"
     end
 
     def apache_bench(options)

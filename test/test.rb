@@ -5,11 +5,13 @@ require File.dirname(__FILE__) + '/maxconn_test'
 #
 begin
   req_per_backend = 200
-  nbackends = 15
+  nbackends = 5
   max_connections = 2
+  worker_processes = 1
   nginx = MaxconnTest::Nginx.new(
     :max_connections => max_connections,
-    :nbackends => nbackends
+    :nbackends => nbackends,
+    :worker_processes => worker_processes
   )
   nginx.start
   nginx.apache_bench(
@@ -18,8 +20,9 @@ begin
     :concurrency => 20
   )
   nginx.backends.each do |backend|
-    if backend.experienced_max_connections !=  max_connections
-      $stderr.puts "backend #{backend.port} had #{backend.experienced_max_connections} max_connections but should have been #{max_connections}"
+    expected_maxconn = max_connections * worker_processes
+    if backend.experienced_max_connections != expected_maxconn
+      $stderr.puts "backend #{backend.port} had #{backend.experienced_max_connections} max_connections but should have been #{expected_maxconn}"
     end
     if backend.experienced_requests != req_per_backend
       $stderr.puts "backend #{backend.port} had #{backend.experienced_requests} requests but should have been #{req_per_backend}"
