@@ -8,6 +8,7 @@ begin
   nbackends = 5
   max_connections = 2
   worker_processes = 2
+
   nginx = MaxconnTest::Nginx.new(
     :max_connections => max_connections,
     :nbackends => nbackends,
@@ -17,17 +18,18 @@ begin
   nginx.apache_bench(
     :path => "/sleep?t=1",
     :requests => req_per_backend*nbackends, 
-    :concurrency => 20
+    :concurrency => 100
   )
+  sleep 1.5 # allow backend logs to catch up
   nginx.backends.each do |backend|
     expected_maxconn = max_connections * worker_processes
-    if backend.experienced_max_connections != expected_maxconn
+    if backend.experienced_max_connections > expected_maxconn
       $stderr.puts "backend #{backend.port} had #{backend.experienced_max_connections} max_connections but should have been #{expected_maxconn}"
+      return 1
     end
-    if backend.experienced_requests != req_per_backend
-      $stderr.puts "backend #{backend.port} had #{backend.experienced_requests} requests but should have been #{req_per_backend}"
-    end
+    $stderr.puts "backend #{backend.port} had #{backend.experienced_requests} requests"
   end
+  puts "sucessful test!"
 ensure
   nginx.shutdown
 end

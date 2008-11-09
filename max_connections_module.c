@@ -119,9 +119,8 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
     index = (n + max_connections_rr_index) % nbackends;
     max_connections_backend_t *backend = &backends[index];
 
-    if (now - backend->accessed > backend->fail_timeout) {
-        backend->fails = 0;                
-    }
+    if(now - backend->accessed > backend->fail_timeout)
+      backend->fails = 0;                
 
     if( backend->fails >= backend->max_fails
      || backend->down
@@ -151,7 +150,7 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
   return choosen;
 }
 
-#define max_connections_upstreams_occupied(maxconn_cf) \
+#define max_connections_upstreams_all_occupied(maxconn_cf) \
   (max_connections_find_open_upstream (maxconn_cf, 0) == NULL)
 
 #define max_connections_find_rotate_upstream(maxconn_cf) \
@@ -262,7 +261,7 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
   r->upstream->peer.tries = 1; /* FIXME - set to maxconn_cf->backends->nelts ?*/
   r->upstream->peer.data  = peer_data;
 
-  if(max_connections_upstreams_occupied(maxconn_cf)) {
+  if(max_connections_upstreams_all_occupied(maxconn_cf)) {
     ngx_log_debug1( NGX_LOG_DEBUG_HTTP
                   , r->connection->log
                   , 0
