@@ -3,10 +3,11 @@ THIS_DIR  = $(shell pwd)
 
 default: compile
 
-configure_debug: 
+configure_debug: clean
 	cd $(NGINX_DIR) && ./configure --with-debug --add-module=$(THIS_DIR) --prefix=$(THIS_DIR)/.nginx
 
-configure: 
+
+configure: clean
 	cd $(NGINX_DIR) && ./configure --add-module=$(THIS_DIR) --prefix=$(THIS_DIR)/.nginx
 
 compile: .nginx/sbin/nginx
@@ -17,10 +18,12 @@ compile: .nginx/sbin/nginx
 .PHONY: test clean restart
 
 test: test/test.rb test/nginx.conf.erb .nginx/sbin/nginx
+	-mkdir -p test/tmp
 	time ruby test/test.rb
 
 clean:
-	rm -rf .nginx
+	-rm -rf .nginx
+	-rm -f test/tmp/*
 
 restart:
 	-killall nginx

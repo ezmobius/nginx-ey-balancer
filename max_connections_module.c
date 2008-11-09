@@ -179,7 +179,7 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
    */
   assert(backend->connections > 0);
 
-  pc->tries--;
+  if(pc) pc->tries--;
 
   backend->connections--; /* free the slot */
 
@@ -222,9 +222,9 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
   assert(backend != NULL && "should always be an availible backend in max_connections_peer_get()");
   assert(backend->connections < maxconn_cf->max_connections);
 
-  backend->connections++;
+  backend->connections++; /* keep track of how many slots are occupied */
 
-  assert(peer_data->backend == NULL);
+  assert(peer_data->backend == NULL && "sanity check");
   peer_data->backend = backend;
 
   pc->sockaddr = backend->sockaddr;
@@ -244,16 +244,15 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
 static ngx_int_t
 max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *uscf)
 {
-
   max_connections_srv_conf_t *maxconn_cf = 
     ngx_http_conf_upstream_srv_conf(uscf, max_connections_module);
 
-  ngx_log_debug0( NGX_LOG_DEBUG_HTTP
-                , r->connection->log
-                , 0
-                , "max_connections_peer_init max connections %ui"
-                , maxconn_cf->max_connections
-                );
+  ngx_log_debug( NGX_LOG_DEBUG_HTTP
+               , r->connection->log
+               , 0
+               , "max_connections_peer_init max connections %ui"
+               , maxconn_cf->max_connections
+               );
 
   max_connections_peer_data_t *peer_data = 
     ngx_palloc(r->pool, sizeof(max_connections_peer_data_t));
@@ -265,7 +264,7 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
 
   r->upstream->peer.free = max_connections_peer_free;
   r->upstream->peer.get  = max_connections_peer_get;
-  r->upstream->peer.tries = 1;
+  r->upstream->peer.tries = 1; /* FIXME */
   r->upstream->peer.data = peer_data;
 
   if(max_connections_upstreams_occupied(maxconn_cf)) {
@@ -281,7 +280,6 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
 
   return NGX_OK;
 }
-
 
 static ngx_int_t
 max_connections_init(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *uscf)
@@ -321,12 +319,6 @@ max_connections_init(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *uscf)
     }
   }
   maxconn_cf->backends = backends;
-
-  ngx_log_debug1( NGX_LOG_DEBUG_HTTP
-                , cf->log
-                , 0
-                , "max_connections number of upstream"
-                );
 
   uscf->peer.init = max_connections_peer_init;
 
