@@ -7,7 +7,7 @@ begin
   req_per_backend = 200
   nbackends = 5
   max_connections = 2
-  worker_processes = 1
+  worker_processes = 2
   nginx = MaxconnTest::Nginx.new(
     :max_connections => max_connections,
     :nbackends => nbackends,

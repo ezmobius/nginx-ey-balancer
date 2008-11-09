@@ -19,22 +19,22 @@ typedef struct {
   socklen_t socklen;
   ngx_str_t *name;
 
-  ngx_uint_t weight;
+  ngx_uint_t weight; /* unused */
   ngx_uint_t  max_fails;
   time_t fail_timeout;
 
   time_t accessed;
   ngx_uint_t down:1;
 
-  ngx_uint_t  fails;
+  ngx_uint_t fails;
   ngx_uint_t connections;
 } max_connections_backend_t;
 
 typedef struct {
   max_connections_srv_conf_t *maxconn_cf;
-  max_connections_backend_t  *backend;
-  ngx_queue_t queue;
-  ngx_http_request_t *r;
+  max_connections_backend_t  *backend; /* the backend the peer was sent to */
+  ngx_queue_t queue; /* queue information */
+  ngx_http_request_t *r; /* the request associated with the peer */
 } max_connections_peer_data_t;
 
 static ngx_uint_t max_connections_rr_index;
@@ -97,9 +97,6 @@ max_connections_dispatch_from_queue (max_connections_srv_conf_t *maxconn_cf)
                 , 0
                 , "max_connections: dispatch"
                 );
-
-  ngx_pfree(r->pool, peer_data); // TODO check return value
-  
   ngx_http_upstream_connect(r, r->upstream);
 }
 
@@ -175,13 +172,11 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
                 );
 
   /* since this backend has just returned this response, it should
-   * have an available slot open. 
-   */
+   * have slot open.  */ 
   assert(backend->connections > 0);
+  backend->connections--; /* free the slot */
 
   if(pc) pc->tries--;
-
-  backend->connections--; /* free the slot */
 
   /* previous connection successful */
   if(state == 0) {
@@ -247,12 +242,12 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
   max_connections_srv_conf_t *maxconn_cf = 
     ngx_http_conf_upstream_srv_conf(uscf, max_connections_module);
 
-  ngx_log_debug( NGX_LOG_DEBUG_HTTP
-               , r->connection->log
-               , 0
-               , "max_connections_peer_init max connections %ui"
-               , maxconn_cf->max_connections
-               );
+  ngx_log_debug1( NGX_LOG_DEBUG_HTTP
+                , r->connection->log
+                , 0
+                , "max_connections_peer_init max connections %ui"
+                , maxconn_cf->max_connections
+                );
 
   max_connections_peer_data_t *peer_data = 
     ngx_palloc(r->pool, sizeof(max_connections_peer_data_t));
@@ -262,10 +257,10 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
   peer_data->maxconn_cf = maxconn_cf;
   peer_data->r = r;
 
-  r->upstream->peer.free = max_connections_peer_free;
-  r->upstream->peer.get  = max_connections_peer_get;
-  r->upstream->peer.tries = 1; /* FIXME */
-  r->upstream->peer.data = peer_data;
+  r->upstream->peer.free  = max_connections_peer_free;
+  r->upstream->peer.get   = max_connections_peer_get;
+  r->upstream->peer.tries = 1; /* FIXME - set to maxconn_cf->backends->nelts ?*/
+  r->upstream->peer.data  = peer_data;
 
   if(max_connections_upstreams_occupied(maxconn_cf)) {
     ngx_log_debug1( NGX_LOG_DEBUG_HTTP

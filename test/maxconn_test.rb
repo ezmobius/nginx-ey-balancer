@@ -197,7 +197,7 @@ module MaxconnTest
       port = env["SERVER_PORT"]
       #@log.puts "#{PORT} connection to #{env["PATH_INFO"]}\n"
       if env["PATH_INFO"] =~ /sleep/
-        sleep 1 
+        sleep 0.5
       end
 
       body = "The time is #{Time.now}\n\nport = #{port}\nurl = #{env["PATH_INFO"]}\r\n"
