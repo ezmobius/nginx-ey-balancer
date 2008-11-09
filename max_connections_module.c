@@ -1,6 +1,7 @@
 /* max connections module for nginx
-** october, november 2008, ryan dahl (ry@ndahl.us)
-*/
+ * Copyright 2008 Engine Yard, Inc. All rights reserved. 
+ * Author: Ryan Dahl (ry@ndahl.us)
+ */
 
 #include <ngx_config.h>
 #include <ngx_core.h>
