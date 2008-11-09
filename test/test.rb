@@ -5,18 +5,19 @@ require File.dirname(__FILE__) + '/maxconn_test'
 #
 begin
   req_per_backend = 200
-  nbackends = 5
-  max_connections = 2
-  worker_processes = 2
+  nbackends = 2
+  max_connections = 1
+  worker_processes = 1
 
   nginx = MaxconnTest::Nginx.new(
     :max_connections => max_connections,
     :nbackends => nbackends,
-    :worker_processes => worker_processes
+    :worker_processes => worker_processes,
+    :use_ssl => false
   )
   nginx.start
   nginx.apache_bench(
-    :path => "/sleep?t=1",
+    :path => "/sleep/0.2",
     :requests => req_per_backend*nbackends, 
     :concurrency => 100
   )

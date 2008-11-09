@@ -15,6 +15,13 @@ http {
 
   server {
     listen <%= port %>;
+
+  <% if use_ssl? %>
+    ssl on;
+    ssl_certificate     <%= cert %>;
+    ssl_certificate_key <%= cert_key %>;
+  <% end %>
+  
     location / { 
       proxy_set_header Host $http_host;
       proxy_set_header X-Real-IP $remote_addr;

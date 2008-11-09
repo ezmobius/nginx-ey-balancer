@@ -119,8 +119,9 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
     index = (n + max_connections_rr_index) % nbackends;
     max_connections_backend_t *backend = &backends[index];
 
-    if(now - backend->accessed > backend->fail_timeout)
-      backend->fails = 0;                
+    if(now - backend->accessed > backend->fail_timeout) {
+      backend->fails = 0;
+    }
 
     if( backend->fails >= backend->max_fails
      || backend->down
@@ -278,7 +279,11 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
 static ngx_int_t
 max_connections_init(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *uscf)
 {
-  ngx_log_debug0(NGX_LOG_DEBUG_HTTP, cf->log, 0, "max_connections_init");
+  ngx_log_debug0( NGX_LOG_DEBUG_HTTP
+                , cf->log
+                , 0
+                , "max_connections_init"
+                );
 
   max_connections_srv_conf_t *maxconn_cf = 
     ngx_http_conf_upstream_srv_conf(uscf, max_connections_module);

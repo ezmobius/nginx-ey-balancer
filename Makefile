@@ -1,14 +1,14 @@
-NGINX_DIR = "/home/ryan/src/nginx-0.6.31"
+NGINX_DIR = "/home/ryan/src/nginx-0.6.32-maxconn-patch"
 THIS_DIR  = $(shell pwd)
 
 default: compile
 
 configure_debug: clean
-	cd $(NGINX_DIR) && ./configure --with-debug --add-module=$(THIS_DIR) --prefix=$(THIS_DIR)/.nginx
+	cd $(NGINX_DIR) && ./configure --with-http_ssl_module --with-debug --add-module=$(THIS_DIR) --prefix=$(THIS_DIR)/.nginx
 
 
 configure: clean
-	cd $(NGINX_DIR) && ./configure --add-module=$(THIS_DIR) --prefix=$(THIS_DIR)/.nginx
+	cd $(NGINX_DIR) && ./configure --with-http_ssl_module --add-module=$(THIS_DIR) --prefix=$(THIS_DIR)/.nginx
 
 compile: .nginx/sbin/nginx
 

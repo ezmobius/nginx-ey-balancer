@@ -19,6 +19,7 @@ module MaxconnTest
     :req_per_backend     => 40,
     :max_connections     => 3,
     :worker_processes    => 3,
+    :use_ssl             => false,
     :nginx_conf_filename => "nginx.conf",
     :nginx_log_filename  => "nginx.log"
   }
@@ -125,8 +126,7 @@ module MaxconnTest
       path = options[:path] || "/"
       requests = options[:requests] || 500
       concurrency = options[:concurrency] || 50
-
-      out = %x{ab -c #{concurrency} -n #{requests}  http://localhost:#{port}#{path}}
+      out = %x{ab -c #{concurrency} -n #{requests}  #{use_ssl? ? "https" : "http"}://localhost:#{port}#{path}}
       if $?.exitstatus != 0 
         $stderr.puts "ab failed"
         $stderr.puts out
@@ -145,6 +145,18 @@ module MaxconnTest
         $stderr.puts "only had #{complete_requests} of #{requests}"
         exit 1
       end
+    end
+
+    def use_ssl?
+      @options[:use_ssl]
+    end
+
+    def cert
+      DIR / "cert.pem"
+    end
+
+    def cert_key
+      DIR / "cert.key"
     end
 
     def conffile
@@ -196,8 +208,9 @@ module MaxconnTest
 
       port = env["SERVER_PORT"]
       #@log.puts "#{PORT} connection to #{env["PATH_INFO"]}\n"
-      if env["PATH_INFO"] =~ /sleep/
-        sleep 0.5
+      if env["PATH_INFO"] =~ %r{/sleep/(\d+(\.\d+)?)}
+        seconds = $1.to_f
+        sleep seconds
       end
 
       body = "The time is #{Time.now}\n\nport = #{port}\nurl = #{env["PATH_INFO"]}\r\n"
