@@ -1,15 +1,12 @@
 /* max connections module for nginx
-** october 2008, ryan dahl (ry@ndahl.us)
+** october, november 2008, ryan dahl (ry@ndahl.us)
 */
-
 
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
 #include <ngx_http_upstream.h>
 #include <assert.h>
-
-#define DEFAULT_MAX_CONNECTIONS 2
 
 typedef struct {
   ngx_uint_t max_connections;
@@ -29,6 +26,7 @@ typedef struct {
   time_t accessed;
   ngx_uint_t down:1;
 
+  ngx_uint_t  fails;
   ngx_uint_t connections;
 } max_connections_backend_t;
 
@@ -39,6 +37,7 @@ typedef struct {
   ngx_http_request_t *r;
 } max_connections_peer_data_t;
 
+static ngx_uint_t max_connections_rr_index;
 
 /* forward declarations */
 static char * max_connections_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
@@ -82,7 +81,7 @@ ngx_module_t max_connections_module =
                         };
 
 static void
-max_connections_dispatch_new_connection (max_connections_srv_conf_t *maxconn_cf)
+max_connections_dispatch_from_queue (max_connections_srv_conf_t *maxconn_cf)
 {
   assert(!ngx_queue_empty(&maxconn_cf->waiting_requests)); 
 
@@ -104,9 +103,6 @@ max_connections_dispatch_new_connection (max_connections_srv_conf_t *maxconn_cf)
   ngx_http_upstream_connect(r, r->upstream);
 }
 
-static ngx_uint_t max_connections_rr_index;
-
-
 static max_connections_backend_t*
 max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_int_t rotate)
 {
@@ -117,6 +113,7 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
            ;
   ngx_uint_t nbackends = maxconn_cf->backends->nelts;
   max_connections_backend_t *backends = maxconn_cf->backends->elts;
+  time_t now = ngx_time();
   for(n = 0; n < nbackends; n++) {
     /* we're just iterating through the backends. the strange index
      * is so that we always start a new place in the array and not 
@@ -124,6 +121,14 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
      */
     index = (n + max_connections_rr_index) % nbackends;
     max_connections_backend_t *backend = &backends[index];
+
+    if (now - backend->accessed > backend->fail_timeout) {
+        backend->fails = 0;                
+    }
+
+    if( backend->fails >= backend->max_fails
+     || backend->down
+      ) continue;
 
     if(backend->connections < min_backend_connections) {
       min_backend_connections = backend->connections;
@@ -135,6 +140,8 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
 
   max_connections_backend_t *choosen = &backends[min_backend_index];
   assert(choosen->connections == min_backend_connections);
+  assert(!choosen->down);
+  assert(choosen->fails < choosen->max_fails);
 
   if(rotate)
     /* increase the index that we start our iteration at */
@@ -172,29 +179,25 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
    */
   assert(backend->connections > 0);
 
-  backend->connections--; /* free the slot */
   pc->tries--;
-  peer_data->backend = NULL;
 
-  /* Connection successful */
+  backend->connections--; /* free the slot */
+
+  /* previous connection successful */
   if(state == 0) {
     if(!ngx_queue_empty(&maxconn_cf->waiting_requests)) {
-      max_connections_dispatch_new_connection(maxconn_cf);
+      max_connections_dispatch_from_queue (maxconn_cf);
     }
+  } else {
+    /* previous connection failed (state & NGX_PEER_FAILED)
+     * or 
+     * either the connection failed, or it succeeded but the application
+     * returned an error (state & NGX_PEER_NEXT) 
+     */ 
+    peer_data->backend->accessed = ngx_time();
+    peer_data->backend->fails++;
   }
-  
-  /* Connection failed */
-  if(state == NGX_PEER_FAILED) {  
-    /* TODO try a differnt backend if error 
-     * mark the backend as down? 
-     */
-  }
-
-  /* either the connection failed, or it succeeded but the application
-   * returned an error */
-  if(state == NGX_PEER_NEXT) {  
-    /* TODO try a differnt backend if error */
-  }
+  peer_data->backend = NULL;
 }
 
 static ngx_int_t
@@ -338,13 +341,9 @@ max_connections_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
   ngx_http_upstream_srv_conf_t *uscf = 
     ngx_http_conf_get_module_srv_conf(cf, ngx_http_upstream_module);
-
-  max_connections_srv_conf_t *maxconn_cf = 
-    ngx_http_conf_upstream_srv_conf(uscf, max_connections_module);
-
+  /* 1. set the initialization function */
   uscf->peer.init_upstream = max_connections_init;
 
-  /* read options */
   ngx_str_t *value = cf->args->elts;
   ngx_int_t max_connections = ngx_atoi(value[1].data, value[1].len);
 
@@ -358,7 +357,12 @@ max_connections_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                       );
     return NGX_CONF_ERROR;
   }
+
+  max_connections_srv_conf_t *maxconn_cf = 
+    ngx_http_conf_upstream_srv_conf(uscf, max_connections_module);
+  /* 2. set the number of max_connections */
   maxconn_cf->max_connections = (ngx_uint_t)max_connections;
+
   return NGX_CONF_OK;
 }
 
@@ -370,6 +374,6 @@ max_connections_create_conf(ngx_conf_t *cf)
 
     if (conf == NULL) return NGX_CONF_ERROR;
     max_connections_rr_index = 0;
-    conf->max_connections = DEFAULT_MAX_CONNECTIONS;
+    conf->max_connections = 1;
     return conf;
 }

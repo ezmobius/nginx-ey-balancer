@@ -3,8 +3,11 @@ THIS_DIR  = $(shell pwd)
 
 default: compile
 
-configure: 
+configure_debug: 
 	cd $(NGINX_DIR) && ./configure --with-debug --add-module=$(THIS_DIR) --prefix=$(THIS_DIR)/.nginx
+
+configure: 
+	cd $(NGINX_DIR) && ./configure --add-module=$(THIS_DIR) --prefix=$(THIS_DIR)/.nginx
 
 compile: .nginx/sbin/nginx
 

@@ -103,8 +103,6 @@ module MaxconnTest
           return
         rescue Errno::ECONNREFUSED
           sleep 0.1
-        rescue e
-          raise e
         end
       end
     end
