@@ -81,6 +81,13 @@ ngx_module_t max_connections_module =
                         , NGX_MODULE_V1_PADDING
                         };
 
+/* This function takes the oldest request on the queue
+ * (maxconn_cf->waiting_requests) and dispatches it to the backends.  This
+ * calls ngx_http_upstream_connect() which will in turn call the peer get
+ * callback, max_connections_peer_get(). max_connections_peer_get() will do
+ * the actual selection of backend. Here we're just giving the request the
+ * go-ahead to proceed.
+ */
 static void
 max_connections_dispatch_from_queue (max_connections_srv_conf_t *maxconn_cf)
 {
@@ -101,6 +108,17 @@ max_connections_dispatch_from_queue (max_connections_srv_conf_t *maxconn_cf)
   ngx_http_upstream_connect(r, r->upstream);
 }
 
+/* This is function selects an open backend.
+ * This function is not called directly rather 
+ *   max_connections_upstreams_all_occupied
+ * and
+ *   max_connections_find_rotate_upstream
+ * are used. 
+ * It simply iterates through the backends looking for the one with the
+ * least connections. The global (process-wide) variable
+ * max_connections_rr_index.  is used so that the iteration always starts at
+ * a different place.
+ */
 static max_connections_backend_t*
 max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_int_t rotate)
 {
@@ -152,12 +170,18 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
   return choosen;
 }
 
+/* Returns true if there is no slots to send a request */
 #define max_connections_upstreams_all_occupied(maxconn_cf) \
   (max_connections_find_open_upstream (maxconn_cf, 0) == NULL)
 
+/* finds a backend slot - inceases max_connect_rr_index
+ * returns NULL if none are found. 
+ * */
 #define max_connections_find_rotate_upstream(maxconn_cf) \
   max_connections_find_open_upstream (maxconn_cf, 1)
 
+/* The peer free function which is part of all NGINX upstream modules
+ */
 static void
 max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t state)
 {
@@ -288,8 +312,8 @@ max_connections_init(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *uscf)
   max_connections_srv_conf_t *maxconn_cf = 
     ngx_http_conf_upstream_srv_conf(uscf, max_connections_module);
 
-/* allocate all the max_connections_backend_t. put them in
- * maxconn_cf->backends */
+  /* allocate all the max_connections_backend_t. put them in
+   * maxconn_cf->backends */
   if(uscf->servers == NULL) return NGX_ERROR;
   ngx_http_upstream_server_t *server = uscf->servers->elts;
   ngx_uint_t i, j;

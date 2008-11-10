@@ -24,6 +24,52 @@ module MaxconnTest
     :nginx_log_filename  => "nginx.log"
   }
 
+  def self.run(options)
+    req_per_backend = options[:req_per_backend] || 100
+    nbackends = options[:nbackends] || 2
+    max_connections = options[:max_connections] || 1
+    worker_processes = options[:worker_processes] || 1
+    request_delay = options[:request_delay] || 1
+
+    nginx = MaxconnTest::Nginx.new(
+      :max_connections => max_connections,
+      :nbackends => nbackends,
+      :worker_processes => worker_processes,
+      :use_ssl => false
+    )
+    #nginx.backends.first.delay = 22222
+    nginx.start
+    #sleep 999999
+    nginx.apache_bench(
+      :path => "/sleep/#{request_delay}",
+      :requests => req_per_backend*nbackends, 
+      :concurrency => 50
+    )
+    sleep 1.5 # allow backend logs to catch up
+    error = false 
+    nginx.backends.each do |backend|
+      expected_maxconn = max_connections * worker_processes
+      $stderr.puts "backend #{backend.port}"
+
+      $stderr.print "  maxconn #{backend.experienced_max_connections}"
+      if backend.experienced_max_connections > expected_maxconn
+        $stderr.puts "  ERROR should have been #{expected_maxconn}"
+        error=true
+      else
+        $stderr.puts "  OKAY"
+      end
+      $stderr.puts "  requests #{backend.experienced_requests}"
+    end
+    if error
+      false
+    else
+      puts "sucessful test!"
+      true
+    end
+  ensure
+    nginx.shutdown
+  end
+
   class Backend
     attr_reader :port
     attr_accessor :delay
@@ -38,7 +84,7 @@ module MaxconnTest
 
     def shutdown
       Process.kill("SIGHUP", @pid)
-      $stderr.puts "killed mongrel #{@port}"
+      #$stderr.puts "killed mongrel #{@port}"
       @pid = nil
     end
 
@@ -96,8 +142,8 @@ module MaxconnTest
 
     def shutdown
       backends.each { |b| b.shutdown } 
-      puts "killing nginx"
       %x{pkill -f nginx}
+      #$stderr.puts "killed nginx"
     end
 
     def wait_for_server_to_open_on(port)
@@ -108,7 +154,7 @@ module MaxconnTest
         rescue Errno::ECONNREFUSED
           $stderr.print "."
           $stderr.flush
-          sleep 0.1
+          sleep 0.2
         end
       end
     end
@@ -121,8 +167,8 @@ module MaxconnTest
       write_config
       File.unlink(logfile) if File.exists? logfile
       %x{#{NGINX_BIN} -c #{conffile}} 
-      wait_for_server_to_open_on port
       $stderr.puts "nginx running on #{port}"
+      wait_for_server_to_open_on port
     end
 
     def apache_bench(options)
