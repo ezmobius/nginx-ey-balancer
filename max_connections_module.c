@@ -172,6 +172,14 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
                 , "max_connections_peer_free"
                 );
 
+  /* Nginx sometimes calls peer_free twice in a row. If 
+   * we've set the backend to NULL already, and we haven't got a host
+   * then release the peer with a 500. */
+  if(backend == NULL) {
+    pc->tries = 0;
+    return;
+  }
+
   /* since this backend has just returned this response, it should
    * have slot open.  */ 
   assert(backend->connections > 0);
@@ -185,11 +193,16 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
       max_connections_dispatch_from_queue (maxconn_cf);
     }
   } else {
-    /* previous connection failed (state & NGX_PEER_FAILED)
-     * or 
-     * either the connection failed, or it succeeded but the application
-     * returned an error (state & NGX_PEER_NEXT) 
+    /* previous connection failed (state & NGX_PEER_FAILED) or either the
+     * connection failed, or it succeeded but the application returned an
+     * error (state & NGX_PEER_NEXT) 
      */ 
+    ngx_log_debug0( NGX_LOG_DEBUG_HTTP
+                  , pc->log
+                  , 0
+                  , "max_connections %V failed "
+                  , backend->name
+                  );
     peer_data->backend->accessed = ngx_time();
     peer_data->backend->fails++;
   }
@@ -202,12 +215,6 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
   max_connections_peer_data_t *peer_data = data;
   max_connections_srv_conf_t *maxconn_cf = peer_data->maxconn_cf;
 
-  ngx_log_debug1( NGX_LOG_DEBUG_HTTP
-                , pc->log
-                , 0
-                , "max_connections_peer_get try %ui"
-                , pc->tries
-                );
   /* XXX do i need this?
   pc->cached = 0;
   pc->connection = NULL;
@@ -243,13 +250,6 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
   max_connections_srv_conf_t *maxconn_cf = 
     ngx_http_conf_upstream_srv_conf(uscf, max_connections_module);
 
-  ngx_log_debug1( NGX_LOG_DEBUG_HTTP
-                , r->connection->log
-                , 0
-                , "max_connections_peer_init max connections %ui"
-                , maxconn_cf->max_connections
-                );
-
   max_connections_peer_data_t *peer_data = 
     ngx_palloc(r->pool, sizeof(max_connections_peer_data_t));
   if(peer_data == NULL) return NGX_ERROR;
@@ -264,11 +264,10 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
   r->upstream->peer.data  = peer_data;
 
   if(max_connections_upstreams_all_occupied(maxconn_cf)) {
-    ngx_log_debug1( NGX_LOG_DEBUG_HTTP
+    ngx_log_debug0( NGX_LOG_DEBUG_HTTP
                   , r->connection->log
                   , 0
-                  , "max_connections queue request %p"
-                  , r
+                  , "max_connections queue "
                   );
     ngx_queue_insert_head(&maxconn_cf->waiting_requests, &peer_data->queue);
     return NGX_BUSY;

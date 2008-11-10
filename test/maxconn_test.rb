@@ -26,7 +26,9 @@ module MaxconnTest
 
   class Backend
     attr_reader :port
+    attr_accessor :delay
     def initialize(p)
+      @delay = 0
       @port = p
     end
 
@@ -50,6 +52,7 @@ module MaxconnTest
         File.open(logfile, "w+") do |f|
           $stderr.puts "Mongrel running on #{port}"
           app = MaxconnTest::UpstreamApplication.new(f)
+          app.delay = @delay
           Thread.new(app) do |a|
             loop do 
               a.output_stats
@@ -188,6 +191,7 @@ module MaxconnTest
   end
 
   class UpstreamApplication
+    attr_accessor :delay
     def initialize(log)
       @log = log
       @concurrent_connections = 0
@@ -195,6 +199,7 @@ module MaxconnTest
       @max_concurrent_connections = 0
       @need_update = true
       @lock = Mutex.new
+      @delay = 0
     end
 
     def call(env)
@@ -212,6 +217,7 @@ module MaxconnTest
         seconds = $1.to_f
         sleep seconds
       end
+      sleep @delay
 
       body = "The time is #{Time.now}\n\nport = #{port}\nurl = #{env["PATH_INFO"]}\r\n"
       content_type = "text/plain"

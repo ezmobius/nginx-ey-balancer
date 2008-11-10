@@ -8,7 +8,7 @@ http {
 
   upstream backend {
   <% backends.each do |backend| %>
-    server localhost:<%= backend.port %>;
+    server localhost:<%= backend.port %> fail_timeout=10s;
   <% end %>
     max_connections <%= max_connections %>;
   }

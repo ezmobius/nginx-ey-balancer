@@ -15,7 +15,9 @@ begin
     :worker_processes => worker_processes,
     :use_ssl => false
   )
+  nginx.backends.first.delay = 22222
   nginx.start
+  #sleep 999999
   nginx.apache_bench(
     :path => "/sleep/0.2",
     :requests => req_per_backend*nbackends, 
@@ -26,7 +28,6 @@ begin
     expected_maxconn = max_connections * worker_processes
     if backend.experienced_max_connections > expected_maxconn
       $stderr.puts "backend #{backend.port} had #{backend.experienced_max_connections} max_connections but should have been #{expected_maxconn}"
-      return 1
     end
     $stderr.puts "backend #{backend.port} had #{backend.experienced_requests} requests"
   end
