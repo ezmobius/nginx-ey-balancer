@@ -8,7 +8,7 @@ MaxconnTest.run(
   :nbackends => 5,
   :max_connections => 4,
   :worker_processes => 1,
-  :request_delay => 10
+  :request_delay => 1
 )
 
 #

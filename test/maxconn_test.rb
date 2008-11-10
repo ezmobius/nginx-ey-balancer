@@ -1,4 +1,5 @@
 require 'erb'
+require 'socket'
 require 'rubygems'
 require 'rack'
 require 'thread'
@@ -83,8 +84,9 @@ module MaxconnTest
     end
 
     def shutdown
+      return if @pid.nil?
       Process.kill("SIGHUP", @pid)
-      #$stderr.puts "killed mongrel #{@port}"
+      $stderr.puts "killed mongrel #{@port}"
       @pid = nil
     end
 
@@ -149,7 +151,7 @@ module MaxconnTest
     def wait_for_server_to_open_on(port)
       loop do
         begin 
-          socket = TCPSocket.open("localhost", port)
+          socket = ::TCPSocket.open("127.0.0.1", port)
           return
         rescue Errno::ECONNREFUSED
           $stderr.print "."

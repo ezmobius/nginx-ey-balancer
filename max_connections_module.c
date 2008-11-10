@@ -221,7 +221,7 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
      * connection failed, or it succeeded but the application returned an
      * error (state & NGX_PEER_NEXT) 
      */ 
-    ngx_log_debug0( NGX_LOG_DEBUG_HTTP
+    ngx_log_debug1( NGX_LOG_DEBUG_HTTP
                   , pc->log
                   , 0
                   , "max_connections %V failed "
