@@ -10,6 +10,25 @@ class String
   end
 end
 
+def assert(x, msg="")
+  raise "failure #{msg}" unless x
+end
+
+def assert_equal(a, b, msg = "")
+  unless a == b
+    $stderr.puts "\n<#{a}> != <#{b}>"
+    raise "failure: #{msg}" 
+  end
+end
+
+def assert_in_delta(a, b, delta, msg ="")
+  unless (a - b).abs < delta
+    $stderr.puts "\n<#{a}> is not within <#{delta}> of <#{b}>"
+    raise "failure: #{msg}" 
+  end
+end
+
+
 module MaxconnTest
   DIR       = File.dirname(__FILE__)
   TMPDIR    = DIR / "tmp"
@@ -43,11 +62,12 @@ module MaxconnTest
     nginx.start
 
 
-    nginx.apache_bench(
+    nginx.httperf(
       :path => "/",
       :requests => req_per_backend * backends.length, 
       :concurrency => 50
     )
+    
     sleep 1.5 # let the logs catch up
     true
   ensure
@@ -182,6 +202,37 @@ module MaxconnTest
       %x{#{NGINX_BIN} -c #{conffile}} 
       $stderr.puts "nginx running on #{port}" if $DEBUG
       wait_for_server_to_open_on port
+    end
+
+    def httperf(options)
+      path = options[:path] || "/"
+      requests = options[:requests] || 500
+      concurrency = options[:concurrency] || 50
+      concurrency = requests - 1 if concurrency > requests
+
+      #@logger.info "Sending #{@num_conns} hits to #{server}:#{port}#{uri}"
+      cmd = "httperf #{"--ssl" if use_ssl?} --hog --timeout 10 --rate #{concurrency} --port #{port} --uri #{path} --num-conns #{requests}"
+      output = `#{cmd}`
+      httperf_parse_results output
+    end
+   
+    # from topfunky's bong
+    def httperf_parse_results(output)
+      stat = {}
+   
+      # Total: connections 5 requests 5 replies 5 test-duration 0.013 s
+      stat['duration'] = output.scan(/test-duration ([\d.]+)/).flatten.first.to_f
+   
+      # Reply rate [replies/s]: min 0.0 avg 0.0 max 0.0 stddev 0.0 (0 samples)
+      (stat['min'], stat['avg'], stat['max'], stat['stddev'], stat['samples']) = output.scan(/Reply rate \[replies\/s\]: min ([\d.]+) avg ([\d.]+) max ([\d.]+) stddev ([\d.]+) \((\d+) samples\)/).flatten.map { |i| i.to_f }
+   
+      # Reply status: 1xx=0 2xx=5 3xx=0 4xx=0 5xx=0
+      (stat['1xx'], stat['2xx'], stat['3xx'], stat['4xx'], stat['5xx']) = output.scan(/Reply status: 1xx=(\d+) 2xx=(\d+) 3xx=(\d+) 4xx=(\d+) 5xx=(\d+)/).flatten.map { |i| i.to_f }
+   
+      stat['avg_low'] = stat['avg'].to_f - 2.0 * stat['stddev'].to_f
+      stat['avg_high'] = stat['avg'].to_f + 2.0 * stat['stddev'].to_f
+   
+      stat
     end
 
     def apache_bench(options)
