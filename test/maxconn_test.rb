@@ -25,91 +25,40 @@ module MaxconnTest
     :nginx_log_filename  => "nginx.log"
   }
 
-  def self.run(options)
-    req_per_backend = options[:req_per_backend] || 100
-    nbackends = options[:nbackends] || 2
-    max_connections = options[:max_connections] || 1
+  def self.test(backends, options ={})
+    req_per_backend  = options[:req_per_backend]  || 100
+    max_connections  = options[:max_connections]  || 1
     worker_processes = options[:worker_processes] || 1
-    request_delay = options[:request_delay] || 1
+    if options.has_key?(:use_ssl)
+      use_ssl = options[:use_ssl] 
+    else
+      use_ssl = false
+    end
 
-    nginx = MaxconnTest::Nginx.new(
+    nginx = MaxconnTest::Nginx.new(backends,
       :max_connections => max_connections,
-      :nbackends => nbackends,
       :worker_processes => worker_processes,
-      :use_ssl => false
+      :use_ssl => use_ssl
     )
-    #nginx.backends.first.delay = 22222
     nginx.start
-    #sleep 999999
+
+
     nginx.apache_bench(
-      :path => "/sleep/#{request_delay}",
-      :requests => req_per_backend*nbackends, 
+      :path => "/",
+      :requests => req_per_backend * backends.length, 
       :concurrency => 50
     )
-    sleep 1.5 # allow backend logs to catch up
-    error = false 
-    nginx.backends.each do |backend|
-      expected_maxconn = max_connections * worker_processes
-      $stderr.puts "backend #{backend.port}"
-
-      $stderr.print "  maxconn #{backend.experienced_max_connections}"
-      if backend.experienced_max_connections > expected_maxconn
-        $stderr.puts "  ERROR should have been #{expected_maxconn}"
-        error=true
-      else
-        $stderr.puts "  OKAY"
-      end
-      $stderr.puts "  requests #{backend.experienced_requests}"
-    end
-    if error
-      false
-    else
-      puts "sucessful test!"
-      true
-    end
+    sleep 1.5 # let the logs catch up
+    true
   ensure
+    backends.each { |b| b.shutdown } 
     nginx.shutdown
   end
 
-  class Backend
+  class Backend # abstract
     attr_reader :port
-    attr_accessor :delay
-    def initialize(p)
-      @delay = 0
-      @port = p
-    end
-
     def logfile
-      TMPDIR / "backend-#{@port}.log"
-    end
-
-    def shutdown
-      return if @pid.nil?
-      Process.kill("SIGHUP", @pid)
-      $stderr.puts "killed mongrel #{@port}"
-      @pid = nil
-    end
-
-    def start
-      unless @pid.nil?
-        $stderr.puts "trying to start mongrel that is already running!"
-        shutdown
-      end
-      File.unlink(logfile) if File.exists? logfile 
-      @pid = fork do 
-        File.open(logfile, "w+") do |f|
-          $stderr.puts "Mongrel running on #{port}"
-          app = MaxconnTest::UpstreamApplication.new(f)
-          app.delay = @delay
-          Thread.new(app) do |a|
-            loop do 
-              a.output_stats
-              sleep 1
-            end
-          end
-          Rack::Handler::Mongrel.run(app, :Port => port) 
-        end
-      end
+      TMPDIR / "backend-#{port}.log"
     end
 
     def experienced_max_connections
@@ -130,46 +79,108 @@ module MaxconnTest
       end
       {:max_connections => $1.to_i, :requests => $2.to_i}
     end
+
+    def output_stats(file)
+      file.puts "max:#{@max_concurrent_connections} total:#{@connections}"
+      file.flush
+      $stderr.print "'" # to see that everything is working
+      $stderr.flush
+    end
   end
 
-  class Nginx
-    attr_reader :backends
-    def initialize(options = {})
-      @options = DEFAULTS.merge(options)
-      @backends = []
-      options[:nbackends].to_i.times do |i|
-        @backends << Backend.new(i+1+port)
+  class DelayBackend < Backend
+    def initialize(delay)
+      @delay = delay
+      @concurrent_connections = 0
+      @connections = 0
+      @max_concurrent_connections = 0
+      @need_update = true
+      @lock = Mutex.new
+    end
+
+    def start(port)
+      unless @pid.nil?
+        $stderr.puts "trying to start mongrel that is already running!"
+        shutdown
       end
-    end
-
-    def shutdown
-      backends.each { |b| b.shutdown } 
-      %x{pkill -f nginx}
-      #$stderr.puts "killed nginx"
-    end
-
-    def wait_for_server_to_open_on(port)
-      loop do
-        begin 
-          socket = ::TCPSocket.open("127.0.0.1", port)
-          return
-        rescue Errno::ECONNREFUSED
-          $stderr.print "."
-          $stderr.flush
-          sleep 0.2
+      @port = port
+      File.unlink(logfile) if File.exists? logfile 
+      @pid = fork do 
+        File.open(logfile, "w+") do |f|
+          $stderr.puts "DelayBackend running on #{port}" if $DEBUG
+          Thread.new do 
+            loop do 
+              @lock.synchronize do
+                output_stats(f) if @need_update
+                @need_update = false
+              end
+              sleep 1
+            end
+          end
+          Rack::Handler::Mongrel.run(self, :Port => port) 
         end
       end
     end
 
+    def shutdown
+      return if @pid.nil?
+      Process.kill("SIGHUP", @pid)
+      $stderr.puts "killed mongrel #{@port}" if $DEBUG
+      @pid = nil
+    end
+
+    def call(env)
+      @lock.synchronize do 
+        @concurrent_connections += 1
+        @connections += 1
+        if @max_concurrent_connections < @concurrent_connections
+          @max_concurrent_connections = @concurrent_connections
+        end
+        @need_update = true 
+      end
+
+      status = 200
+      sleep @delay
+      body = "The time is #{Time.now}\n"
+
+      @lock.synchronize do 
+        @need_update = true 
+        @concurrent_connections -= 1;
+      end
+
+      [status, {"Content-Type" => "text/plain"}, body]
+    end
+  end
+
+  class NoResponseBackend < DelayBackend
+    def initialize
+      super(99999999)
+    end
+  end
+
+  class Nginx
+    attr_reader :backends
+    def initialize(backends, options = {})
+      @backends = backends
+      @options = DEFAULTS.merge(options)
+    end
+
+    def shutdown
+      %x{pkill -f nginx}
+      $stderr.puts "killed nginx" if $DEBUG
+    end
+
     def start
+      p = port + 1 # for assigning ports to the backend
       backends.each do |backend|
-        backend.start
+        backend.start(p)
         wait_for_server_to_open_on backend.port
+        p += 1
       end
       write_config
       File.unlink(logfile) if File.exists? logfile
       %x{#{NGINX_BIN} -c #{conffile}} 
-      $stderr.puts "nginx running on #{port}"
+      $stderr.puts "nginx running on #{port}" if $DEBUG
       wait_for_server_to_open_on port
     end
 
@@ -177,7 +188,8 @@ module MaxconnTest
       path = options[:path] || "/"
       requests = options[:requests] || 500
       concurrency = options[:concurrency] || 50
-      out = %x{ab -c #{concurrency} -n #{requests}  #{use_ssl? ? "https" : "http"}://localhost:#{port}#{path}}
+      concurrency = requests - 1 if concurrency > requests
+      out = %x{ab -q -c #{concurrency} -n #{requests}  #{use_ssl? ? "https" : "http"}://localhost:#{port}#{path}}
       if $?.exitstatus != 0 
         $stderr.puts "ab failed"
         $stderr.puts out
@@ -236,54 +248,16 @@ module MaxconnTest
         f.write(ERB.new(template).result(binding))
       end
     end
-  end
 
-  class UpstreamApplication
-    attr_accessor :delay
-    def initialize(log)
-      @log = log
-      @concurrent_connections = 0
-      @connections = 0
-      @max_concurrent_connections = 0
-      @need_update = true
-      @lock = Mutex.new
-      @delay = 0
-    end
-
-    def call(env)
-      @lock.synchronize do 
-        @concurrent_connections += 1
-        @connections += 1
-        if @max_concurrent_connections < @concurrent_connections
-          @max_concurrent_connections = @concurrent_connections
-        end
-      end
-
-      port = env["SERVER_PORT"]
-      #@log.puts "#{PORT} connection to #{env["PATH_INFO"]}\n"
-      if env["PATH_INFO"] =~ %r{/sleep/(\d+(\.\d+)?)}
-        seconds = $1.to_f
-        sleep seconds
-      end
-      sleep @delay
-
-      body = "The time is #{Time.now}\n\nport = #{port}\nurl = #{env["PATH_INFO"]}\r\n"
-      content_type = "text/plain"
-
-      @lock.synchronize do 
-        @need_update = true 
-        @concurrent_connections -= 1;
-      end
-
-      [200, {"Content-Type" => content_type}, body]
-    end
-
-    def output_stats
-      @lock.synchronize do
-        if @need_update
-          @log.puts "max:#{@max_concurrent_connections} total:#{@connections}"
-          @log.flush
-          @need_update = false
+    def wait_for_server_to_open_on(port)
+      loop do
+        begin 
+          socket = ::TCPSocket.open("127.0.0.1", port)
+          return
+        rescue Errno::ECONNREFUSED
+          $stderr.print "." if $DEBUG
+          $stderr.flush
+          sleep 0.2
         end
       end
     end

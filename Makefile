@@ -19,7 +19,7 @@ compile: .nginx/sbin/nginx
 
 test: test/test.rb test/nginx.conf.erb .nginx/sbin/nginx
 	-mkdir -p test/tmp
-	time ruby test/test.rb
+	ruby test/test.rb
 
 clean:
 	-rm -rf .nginx
