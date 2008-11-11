@@ -17,7 +17,7 @@ compile: .nginx/sbin/nginx
 
 .PHONY: test clean restart
 
-test: test/test.rb test/nginx.conf.erb .nginx/sbin/nginx
+test: test/nginx.conf.erb .nginx/sbin/nginx
 	-mkdir -p test/tmp
 	cd test && sh run_tests.sh
 
