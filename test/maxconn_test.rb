@@ -151,6 +151,7 @@ module MaxconnTest
 
     def call(env)
       @lock.synchronize do 
+        puts "start"
         @concurrent_connections += 1
         @connections += 1
         if @max_concurrent_connections < @concurrent_connections
@@ -163,12 +164,14 @@ module MaxconnTest
       sleep @delay
       body = "The time is #{Time.now}\n"
 
+      [status, {"Content-Type" => "text/plain"}, body]
+
+    ensure
       @lock.synchronize do 
         @need_update = true 
         @concurrent_connections -= 1;
+        puts "end"
       end
-
-      [status, {"Content-Type" => "text/plain"}, body]
     end
   end
 
@@ -211,7 +214,7 @@ module MaxconnTest
       concurrency = requests - 1 if concurrency > requests
 
       #@logger.info "Sending #{@num_conns} hits to #{server}:#{port}#{uri}"
-      cmd = "httperf #{"--ssl" if use_ssl?} --hog --timeout 10 --rate #{concurrency} --port #{port} --uri #{path} --num-conns #{requests}"
+      cmd = "httperf #{"--ssl" if use_ssl?} --hog --timeout 30 --rate #{concurrency} --port #{port} --uri #{path} --num-conns #{requests}"
       output = `#{cmd}`
       httperf_parse_results output
     end
