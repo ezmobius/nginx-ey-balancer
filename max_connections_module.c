@@ -85,6 +85,18 @@ ngx_module_t max_connections_module =
                         };
 
 
+static ngx_uint_t
+max_connections_queue_size (max_connections_srv_conf_t *maxconn_cf)
+{
+    ngx_queue_t *node;
+    ngx_uint_t queue_size = 0;
+    for( node = maxconn_cf->waiting_requests.next
+       ; node && node != &maxconn_cf->waiting_requests 
+       ; node = node->next
+       ) queue_size += 1;
+    return queue_size;
+}
+
 /* This function takes the oldest request on the queue
  * (maxconn_cf->waiting_requests) and dispatches it to the backends.  This
  * calls ngx_http_upstream_connect() which will in turn call the peer get
@@ -266,10 +278,11 @@ max_connections_cleanup(void *data)
 
   if(peer_data->queue.next != NULL && peer_data->queue.prev != NULL) {
     ngx_queue_remove(&peer_data->queue);
-    ngx_log_debug0( NGX_LOG_DEBUG_HTTP
+    ngx_log_debug1( NGX_LOG_DEBUG_HTTP
                   , r->connection->log
                   , 0
-                  , "max_connections removing from queue"
+                  , "max_connections del queue (new size %ui)"
+                  , max_connections_queue_size(peer_data->maxconn_cf)
                   );
   }
 
@@ -345,20 +358,13 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
 
 
   if(max_connections_upstreams_all_occupied(maxconn_cf)) {
-    ngx_queue_t *node;
-    ngx_uint_t queue_size = 0;
-    for( node = maxconn_cf->waiting_requests.next
-       ; node && node != &maxconn_cf->waiting_requests 
-       ; node = node->next
-       ) queue_size += 1;
+    ngx_queue_insert_head(&maxconn_cf->waiting_requests, &peer_data->queue);
     ngx_log_debug1( NGX_LOG_DEBUG_HTTP
                   , r->connection->log
                   , 0
-                  , "max_connections queue (size %ui)"
-                  , queue_size
+                  , "max_connections add queue (new size %ui)"
+                  , max_connections_queue_size(maxconn_cf)
                   );
-    ngx_queue_insert_head(&maxconn_cf->waiting_requests, &peer_data->queue);
-
     return NGX_BUSY;
   }
 

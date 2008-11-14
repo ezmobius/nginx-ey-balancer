@@ -14,7 +14,7 @@ end
 
 total_received = 0
 backends.each do |b|
-  assert_in_delta(50, b.experienced_requests, 5, 
+  assert_in_delta(50, b.experienced_requests, 10, 
     "backend #{b.port} is not balanced")
 
   assert(b.experienced_max_connections <= 2, 
