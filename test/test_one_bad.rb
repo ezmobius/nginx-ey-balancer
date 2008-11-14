@@ -2,7 +2,7 @@ require File.dirname(__FILE__) + '/maxconn_test'
 
 no_response = MaxconnTest::NoResponseBackend.new
 other_backends = []
-3.times { other_backends << MaxconnTest::DelayBackend.new(0.2) }
+3.times { other_backends << MaxconnTest::DelayBackend.new(0.4) }
 
 test_nginx([no_response, *other_backends],
   :max_connections => 2, # per backend, per worker
@@ -23,7 +23,8 @@ total_received = 2
 # 78 left. 78/3 = 26
 
 other_backends.each do |b|
-  assert_in_delta(26, b.experienced_requests, 5, 
+  puts b.experienced_requests
+  assert_in_delta(26, b.experienced_requests, 3, 
     "backend #{b.port} is not balanced")
 
   assert_equal(b.experienced_max_connections, 2, 

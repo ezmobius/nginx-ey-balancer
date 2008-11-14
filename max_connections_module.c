@@ -122,9 +122,7 @@ max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
     return;
   }
 
-
-  if(r->connection->error)
-  {
+  if(r->connection->error) {
     ngx_log_debug0( NGX_LOG_DEBUG_HTTP
                   , r->connection->log
                   , 0
@@ -314,7 +312,6 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
   assert(backend != NULL && "should always be an availible backend in max_connections_peer_get()");
   assert(backend->connections < maxconn_cf->max_connections);
 
-  assert(peer_data->backend == NULL && "sanity check");
   peer_data->backend = backend;
 
   pc->sockaddr = backend->sockaddr;
