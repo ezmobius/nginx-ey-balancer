@@ -6,7 +6,6 @@ default: compile
 configure_debug: clean
 	cd $(NGINX_DIR) && ./configure --with-http_ssl_module --with-debug --add-module=$(THIS_DIR) --prefix=$(THIS_DIR)/.nginx
 
-
 configure: clean
 	cd $(NGINX_DIR) && ./configure --with-http_ssl_module --add-module=$(THIS_DIR) --prefix=$(THIS_DIR)/.nginx
 
@@ -17,9 +16,12 @@ compile: .nginx/sbin/nginx
 
 .PHONY: test clean restart
 
-test: test/nginx.conf.erb .nginx/sbin/nginx
+test: .nginx/sbin/nginx
 	-mkdir -p test/tmp
-	cd test && sh run_tests.sh
+	@for i in test/test_*; do \
+	  echo -n "$$i: ";	\
+		ruby $$i && echo " PASS" || echo " FAIL";	\
+	done 
 
 clean:
 	-rm -rf .nginx
