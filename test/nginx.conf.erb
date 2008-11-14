@@ -1,5 +1,7 @@
 error_log <%= logfile %> debug;
-events { }
+events { 
+  debug_connection 127.0.0.1;
+}
 worker_processes <%= worker_processes %>;
 
 http {

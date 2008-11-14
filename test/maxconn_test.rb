@@ -151,7 +151,6 @@ module MaxconnTest
 
     def call(env)
       @lock.synchronize do 
-        puts "start"
         @concurrent_connections += 1
         @connections += 1
         if @max_concurrent_connections < @concurrent_connections
@@ -170,7 +169,6 @@ module MaxconnTest
       @lock.synchronize do 
         @need_update = true 
         @concurrent_connections -= 1;
-        puts "end"
       end
     end
   end

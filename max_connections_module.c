@@ -84,6 +84,7 @@ ngx_module_t max_connections_module =
                         , NGX_MODULE_V1_PADDING
                         };
 
+
 /* This function takes the oldest request on the queue
  * (maxconn_cf->waiting_requests) and dispatches it to the backends.  This
  * calls ngx_http_upstream_connect() which will in turn call the peer get
@@ -94,8 +95,9 @@ ngx_module_t max_connections_module =
 static void
 max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
 {
-  if(ngx_queue_empty(&maxconn_cf->waiting_requests))
-    return;
+  if( ngx_queue_empty(&maxconn_cf->waiting_requests)
+   //|| max_connections_upstreams_all_occupied(maxconn_cf)
+    ) return;
 
   ngx_queue_t *last = ngx_queue_last(&maxconn_cf->waiting_requests);
   ngx_queue_remove(last);
@@ -108,19 +110,15 @@ max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
     return;
   }
 
-  if( r->connection->error 
-   || r->connection->destroyed
-   || r->connection->close
-   || r->connection->timedout
-   || r->connection->unexpected_eof
-    )
+
+  if(r->connection->error)
   {
     ngx_log_debug0( NGX_LOG_DEBUG_HTTP
                   , r->connection->log
                   , 0
                   , "max_connections: request already closed!"
                   );
-    //ngx_http_finalize_request(r, NGX_HTTP_CLIENT_CLOSED_REQUEST);  // XXX rc correct?   
+    ngx_http_finalize_request(r, NGX_HTTP_CLIENT_CLOSED_REQUEST);  // XXX rc correct?   
     max_connections_dispatch (maxconn_cf);
   } else {
     ngx_log_debug0( NGX_LOG_DEBUG_HTTP
@@ -132,16 +130,12 @@ max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
   }
 }
 
-/* This is function selects an open backend.
- * This function is not called directly rather 
- *   max_connections_upstreams_all_occupied
- * and
- *   max_connections_find_rotate_upstream
- * are used. 
- * It simply iterates through the backends looking for the one with the
- * least connections. The global (process-wide) variable
- * max_connections_rr_index.  is used so that the iteration always starts at
- * a different place.
+/* This is function selects an open backend. It is not called directly
+ * rather <max_connections_upstreams_all_occupied> and
+ * <max_connections_find_rotate_upstream> are used. It simply iterates
+ * through the backends looking for the one with the least connections. The
+ * global (process-wide) variable <max_connections_rr_index> is used so that
+ * the iteration always starts at a different place.
  */
 static max_connections_backend_t*
 max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_int_t rotate)
@@ -194,29 +188,14 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
   return choosen;
 }
 
-/* Returns true if there is no slots to send a request */
+/* Returns true if there are no slots to send a request to. */
 #define max_connections_upstreams_all_occupied(maxconn_cf) \
   (max_connections_find_open_upstream (maxconn_cf, 0) == NULL)
 
-/* finds a backend slot - inceases max_connect_rr_index
- * returns NULL if none are found. 
- * */
+/* finds a backend slot and inceases <max_connections_rr_index>.
+ * Returns NULL if none are found. */
 #define max_connections_find_rotate_upstream(maxconn_cf) \
   max_connections_find_open_upstream (maxconn_cf, 1)
-
-static void
-max_connections_disconnect_from_upstream(ngx_event_t *ev)
-{
-  max_connections_backend_t *backend = ev->data;
-  assert(backend->connections > 0);
-  ngx_log_debug0( NGX_LOG_DEBUG_HTTP
-                , ev->log
-                , 0
-                , "max_connections: disconnect"
-                );
-  backend->connections--; /* free the slot */
-  max_connections_dispatch(backend->maxconn_cf);
-}
 
 /* The peer free function which is part of all NGINX upstream modules
  */
@@ -224,14 +203,9 @@ static void
 max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t state)
 {
   max_connections_peer_data_t *peer_data = data;
-  //max_connections_srv_conf_t *maxconn_cf = peer_data->maxconn_cf;
   /* this is the backend that the peer was connecting to */
   max_connections_backend_t *backend = peer_data->backend;
 
-
-  /* Nginx sometimes calls peer_free twice in a row. If 
-   * we've set the backend to NULL already, and we haven't got a host
-   * then release the peer with a 500. */
   if(backend == NULL) {
     ngx_log_debug0( NGX_LOG_DEBUG_HTTP
                   , pc->log
@@ -241,12 +215,12 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
     pc->tries = 0;
     return;
   }
+
   if(pc)
     pc->tries--;
 
   /* previous connection successful */
   if(state == 0) {
-    ;
   } else {
     /* previous connection failed (state & NGX_PEER_FAILED) or either the
      * connection failed, or it succeeded but the application returned an
@@ -270,11 +244,17 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
                 , backend->connections
                 );
   pc->tries = 0;
+}
 
-  if(backend->disconnect_event.prev == NULL) {
-    //ngx_add_timer((&backend->disconnect_event), 2000);
-    ngx_post_event((&backend->disconnect_event), &ngx_posted_events);
-  } 
+static void
+max_connections_disconnect_from_upstream(ngx_event_t *ev)
+{
+  max_connections_backend_t *backend = ev->data;
+  assert(backend->connections > 0);
+  backend->connections--; /* free the slot */
+
+  if(!ngx_queue_empty(&backend->maxconn_cf->waiting_requests))
+    max_connections_dispatch(backend->maxconn_cf);
 }
 
 static void
@@ -282,8 +262,25 @@ max_connections_cleanup(void *data)
 {
   max_connections_peer_data_t *peer_data = data;
   max_connections_backend_t *backend = peer_data->backend;
+  ngx_http_request_t *r = peer_data->r; 
+
+  if(peer_data->queue.next != NULL && peer_data->queue.prev != NULL) {
+    ngx_queue_remove(&peer_data->queue);
+  }
 
   if(backend) {
+    if(r->connection->error) {
+      /*
+      backend->fails++;
+      peer_data->backend->accessed = ngx_time();
+      */
+      if (!backend->disconnect_event.timer_set) {
+        /* allow some time for the connection to reset? */
+        ngx_add_timer((&backend->disconnect_event), 500);
+      }
+    } else {
+      ngx_post_event((&backend->disconnect_event), &ngx_posted_events);
+    }
   }
 }
 
@@ -340,12 +337,11 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
   r->upstream->peer.tries = 1; /* FIXME - set to maxconn_cf->backends->nelts ?*/
   r->upstream->peer.data  = peer_data;
 
-/*
-  ngx_http_cleanup_t *cleanup = ngx_http_cleanup_add(r->upstream, 0);
+  ngx_http_cleanup_t *cleanup = ngx_http_cleanup_add(r, 0);
   if (cleanup == NULL) return NGX_ERROR;
   cleanup->handler = max_connections_cleanup;
   cleanup->data = peer_data; 
-*/
+
 
   if(max_connections_upstreams_all_occupied(maxconn_cf)) {
     ngx_queue_t *node;
