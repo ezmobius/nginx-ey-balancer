@@ -266,16 +266,17 @@ max_connections_cleanup(void *data)
 
   if(peer_data->queue.next != NULL && peer_data->queue.prev != NULL) {
     ngx_queue_remove(&peer_data->queue);
+    ngx_log_debug0( NGX_LOG_DEBUG_HTTP
+                  , r->connection->log
+                  , 0
+                  , "max_connections removing from queue"
+                  );
   }
 
   if(backend) {
     if(r->connection->error) {
-      /*
-      backend->fails++;
-      peer_data->backend->accessed = ngx_time();
-      */
       if (!backend->disconnect_event.timer_set) {
-        /* allow some time for the connection to reset? */
+        /* allow some time for the backend connection to reset? */
         ngx_add_timer((&backend->disconnect_event), 500);
       }
     } else {
