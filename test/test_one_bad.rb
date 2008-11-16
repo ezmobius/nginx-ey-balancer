@@ -23,7 +23,6 @@ total_received = 2
 # 78 left. 78/3 = 26
 
 other_backends.each do |b|
-  puts b.experienced_requests
   assert_in_delta(26, b.experienced_requests, 3, 
     "backend #{b.port} is not balanced")
 

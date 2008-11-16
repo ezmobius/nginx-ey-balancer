@@ -9,7 +9,6 @@ test_nginx(backends,
   out = %x{httperf --ssl --num-conns 20 --hog --timeout 10 --rate 100 --port #{nginx.port} --uri / }
   assert $?.exitstatus == 0
   results = httperf_parse_output(out)
-  p results
   assert_equal 20, results["2xx"]
 end
 total_received = 0
