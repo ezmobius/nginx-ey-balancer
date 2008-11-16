@@ -63,7 +63,17 @@ def test_nginx(backends, options ={})
   )
   nginx.start
   yield(nginx)
+
   sleep 1.5 # let the logs catch up
+
+
+  #make sure it doesn't silently fail on assert
+  out = %x{grep "assert" #{nginx.logfile}}
+  assert_equal "", out
+
+  out = %x{grep SIGTERM #{nginx.logfile} | wc -l}
+  assert_equal 0, out.to_i, "should be no worker crashes"
+
   true
 ensure
   backends.each { |b| b.shutdown } 
@@ -114,8 +124,12 @@ module MaxconnTest
     def output_stats(file)
       file.puts "max:#{@max_concurrent_connections} total:#{@connections}"
       file.flush
-      $stderr.print "'" # to see that everything is working
+      $stderr.print identifier # to see that everything is working
       $stderr.flush
+    end
+
+    def identifier
+      @identifier ||= port.to_s.slice(-1,1) 
     end
   end
 

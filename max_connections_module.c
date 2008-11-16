@@ -84,7 +84,6 @@ ngx_module_t max_connections_module =
                         , NGX_MODULE_V1_PADDING
                         };
 
-
 static ngx_uint_t
 max_connections_queue_size (max_connections_srv_conf_t *maxconn_cf)
 {
@@ -230,9 +229,7 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
     return;
   }
 
-
-  if(pc)
-    pc->tries--;
+  if(pc) pc->tries--;
 
   /* previous connection successful */
   if(state == 0) {
@@ -272,11 +269,6 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
   max_connections_peer_data_t *peer_data = data;
   max_connections_srv_conf_t *maxconn_cf = peer_data->maxconn_cf;
 
-  /* XXX do i need this?
-  pc->cached = 0;
-  pc->connection = NULL;
-  */
-
   /* should not be in the queue */
   assert(peer_data->queue.next == peer_data->queue.prev);
 
@@ -315,19 +307,11 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
   peer_data->backend = NULL;
   peer_data->maxconn_cf = maxconn_cf;
   peer_data->r = r;
-  ngx_queue_init(&peer_data->queue);
 
   r->upstream->peer.free  = max_connections_peer_free;
   r->upstream->peer.get   = max_connections_peer_get;
   r->upstream->peer.tries = 1; /* FIXME - set to maxconn_cf->backends->nelts ?*/
   r->upstream->peer.data  = peer_data;
-
-  /*
-  ngx_http_cleanup_t *cleanup = ngx_http_cleanup_add(r, 0);
-  if (cleanup == NULL) return NGX_ERROR;
-  cleanup->handler = max_connections_cleanup;
-  cleanup->data = peer_data; 
-  */
 
   if(max_connections_upstreams_all_occupied(maxconn_cf)) {
     ngx_queue_insert_head(&maxconn_cf->waiting_requests, &peer_data->queue);
@@ -339,11 +323,6 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
                   );
     return NGX_BUSY;
   }
-
-  ngx_queue_remove(&peer_data->queue); /* disable */
-  /* should not be in the queue */
-  assert(peer_data->queue.next == peer_data->queue.prev);
-
   return NGX_OK;
 }
 
@@ -401,7 +380,6 @@ max_connections_init(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *uscf)
 
   ngx_queue_init(&maxconn_cf->waiting_requests);
   assert(ngx_queue_empty(&maxconn_cf->waiting_requests));
-
 
   return NGX_OK;
 }

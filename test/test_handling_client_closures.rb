@@ -11,7 +11,7 @@ test_nginx([backend],
     assert $?.exitstatus == 0
   end
   #out = %x{grep "add queue" #{nginx.logfile} | wc -l}
-  assert $?.exitstatus == 0
+  #assert $?.exitstatus == 0
   # 50 * 20 = 1000
   #assert( out.to_i > 900, 
   #       "at least 900 connections should be added to the queue")

@@ -16,11 +16,16 @@ compile: .nginx/sbin/nginx
 
 .PHONY: test clean restart
 
-test: .nginx/sbin/nginx
-	-mkdir -p test/tmp
+test/tmp:
+	mkdir test/tmp
+
+FAIL="\033[1;31m FAIL\033[m"
+PASS="\033[1;32m PASS\033[m"
+
+test: .nginx/sbin/nginx test/tmp
 	@for i in test/test_*; do \
 	  echo -n "$$i: ";	\
-		ruby $$i && echo " PASS" || echo " FAIL";	\
+		ruby $$i && echo $(PASS) || echo $(FAIL);	\
 	done 
 
 clean:
