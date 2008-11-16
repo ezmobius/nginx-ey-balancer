@@ -162,6 +162,7 @@ module MaxconnTest
               sleep 1
             end
           end
+          trap("INT") { exit 0 }
           Rack::Handler::Mongrel.run(self, :Port => port) 
         end
       end

@@ -181,7 +181,7 @@ max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
   ngx_queue_t *last = ngx_queue_last(&maxconn_cf->waiting_requests);
 
   ngx_queue_remove(last);
-  last->prev = last->next = NULL;
+  last->prev = last->next = NULL; /* TODO HACKY NULL ASSIGNMENT */
 
   max_connections_peer_data_t *peer_data = 
     ngx_queue_data(last, max_connections_peer_data_t, queue);
@@ -218,7 +218,7 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
   if(peer_data->r->connection->error) {
     /* set a small timeout on the backend slot so that it has time to
      * recover from the client closure */
-    if(peer_data->queue.next != NULL) {
+    if(peer_data->queue.next != NULL) { /* TODO HACKY NULL ASSIGNMENT */
       ngx_queue_remove(&peer_data->queue);
     }
     pc->tries = 0;
@@ -269,8 +269,7 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
   max_connections_peer_data_t *peer_data = data;
   max_connections_srv_conf_t *maxconn_cf = peer_data->maxconn_cf;
 
-  /* should not be in the queue */
-  assert(peer_data->queue.next == peer_data->queue.prev);
+  assert(peer_data->queue.next == peer_data->queue.prev && "should not be in the queue");
 
   max_connections_backend_t *backend = 
     max_connections_find_rotate_upstream(maxconn_cf);

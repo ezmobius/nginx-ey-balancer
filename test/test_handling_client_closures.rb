@@ -7,7 +7,7 @@ test_nginx([backend],
   # Pound the server with connections which close on the client-side
   # immeditaely after hitting. (Note --timeout 0.01)
   50.times do 
-    %x{httperf --num-conns 20 --hog --timeout 0.01 --rate 100 --port #{nginx.port} --uri / }
+    %x{httperf --num-conns 20 --hog --timeout 0.01 --rate 100 --port #{nginx.port}}
     assert $?.exitstatus == 0
   end
   #out = %x{grep "add queue" #{nginx.logfile} | wc -l}

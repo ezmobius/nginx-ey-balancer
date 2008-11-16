@@ -10,7 +10,7 @@ test_nginx( [fast, slow],
   :max_connections => 2, # per backend, per worker
   :worker_processes => 1
 ) do |nginx|
-  out = %x{httperf --num-conns 150 --hog --timeout 120 --rate 10 --port #{nginx.port} --uri / }
+  out = %x{httperf --num-conns 150 --hog --timeout 120 --rate 10 --port #{nginx.port}}
   assert $?.exitstatus == 0
   results = httperf_parse_output(out)
   assert_equal 150, results["2xx"]

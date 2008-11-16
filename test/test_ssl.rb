@@ -6,7 +6,7 @@ test_nginx(backends,
   :worker_processes => 1,
   :use_ssl => true
 ) do |nginx|
-  out = %x{httperf --ssl --num-conns 20 --hog --timeout 10 --rate 100 --port #{nginx.port} --uri / }
+  out = %x{httperf --ssl --num-conns 20 --hog --timeout 10 --rate 100 --port #{nginx.port}}
   assert $?.exitstatus == 0
   results = httperf_parse_output(out)
   assert_equal 20, results["2xx"]
