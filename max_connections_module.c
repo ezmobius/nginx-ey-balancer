@@ -209,20 +209,6 @@ max_connections_disconnect_from_upstream(ngx_event_t *ev)
   max_connections_dispatch(backend->maxconn_cf);
 }
 
-/*
-static void
-max_connections_cleanup(void *data)
-{
-  max_connections_peer_data_t *peer_data = data;
-  ngx_log_debug1( NGX_LOG_DEBUG_HTTP
-                , peer_data->r->connection->log
-                , 0
-                , "max_connections die on queue (new queue size %ui)"
-                , max_connections_queue_size(peer_data->maxconn_cf)
-                );
-}
-*/
-
 /* The peer free function which is part of all NGINX upstream modules */
 static void
 max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t state)
@@ -233,17 +219,14 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
   if(peer_data->r->connection->error) {
     /* set a small timeout on the backend slot so that it has time to
      * recover from the client closure */
-    /*
-    if(backend && !backend->disconnect_event.timer_set) {
-      ngx_add_timer((&backend->disconnect_event), 500);
-    }
-    */
     if(peer_data->queue.next != NULL) {
       ngx_queue_remove(&peer_data->queue);
     }
     pc->tries = 0;
-    if(backend)
-      goto disconnect;
+    if(backend && !backend->disconnect_event.timer_set) {
+      peer_data->backend = NULL;
+      ngx_add_timer((&backend->disconnect_event), 500);
+    }
     return;
   }
 
@@ -277,11 +260,9 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
                 );
 
   /* dispatch */
-    //ngx_post_event((&backend->disconnect_event), &ngx_posted_events);
-disconnect:
+  peer_data->backend = NULL;
   assert(backend->connections > 0);
   backend->connections--; /* free the slot */
-  peer_data->backend = NULL;
   max_connections_dispatch(backend->maxconn_cf);
 }
 
