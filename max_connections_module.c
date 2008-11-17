@@ -269,7 +269,9 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
   max_connections_peer_data_t *peer_data = data;
   max_connections_srv_conf_t *maxconn_cf = peer_data->maxconn_cf;
 
-  assert(peer_data->queue.next == peer_data->queue.prev && "should not be in the queue");
+  /* TODO HACKY NULL ASSIGNMENT */
+  assert(peer_data->queue.next == NULL && "should not be in the queue");
+  assert(peer_data->queue.prev == NULL && "should not be in the queue");
 
   max_connections_backend_t *backend = 
     max_connections_find_rotate_upstream(maxconn_cf);
@@ -322,6 +324,7 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
                   );
     return NGX_BUSY;
   }
+  peer_data->queue.prev = peer_data->queue.next = NULL; /* TODO HACKY NULL ASSIGNMENT */
   return NGX_OK;
 }
 

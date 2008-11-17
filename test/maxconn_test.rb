@@ -68,11 +68,11 @@ def test_nginx(backends, options ={})
 
 
   #make sure it doesn't silently fail on assert
-  out = %x{grep "assert" #{nginx.logfile}}
-  assert_equal "", out
+  out = %x{grep "Assertion" #{nginx.logfile}}
+  assert_equal "", out, "should be no assertion failures"
 
-  out = %x{grep SIGTERM #{nginx.logfile} | wc -l}
-  assert_equal 0, out.to_i, "should be no worker crashes"
+  out = %x{egrep "SIGCHLD|SIGTERM" #{nginx.logfile}}
+  assert_equal "", out, "should be no worker crashes"
 
   true
 ensure
@@ -102,12 +102,38 @@ module MaxconnTest
       TMPDIR / "backend-#{port}.log"
     end
 
+    def initialize
+      @concurrent_connections = 0
+      @connections = 0
+      @max_concurrent_connections = 0
+      @need_update = true
+      @lock = Mutex.new
+    end
+
     def experienced_max_connections
       log[:max_connections]
     end
 
     def experienced_requests
       log[:requests]
+    end
+
+    def call(env)
+      @lock.synchronize do 
+        @concurrent_connections += 1
+        @connections += 1
+        if @max_concurrent_connections < @concurrent_connections
+          @max_concurrent_connections = @concurrent_connections
+        end
+        @need_update = true 
+      end
+
+      real_call(env)
+    ensure
+      @lock.synchronize do 
+        @need_update = true 
+        @concurrent_connections -= 1;
+      end
     end
 
     protected
@@ -133,14 +159,10 @@ module MaxconnTest
     end
   end
 
-  class DelayBackend < Backend
-    def initialize(delay)
-      @delay = delay
-      @concurrent_connections = 0
-      @connections = 0
-      @max_concurrent_connections = 0
-      @need_update = true
-      @lock = Mutex.new
+  class MongrelBackend < Backend
+
+    def initialize
+      super()
     end
 
     def start(port)
@@ -174,34 +196,48 @@ module MaxconnTest
       $stderr.puts "killed mongrel #{@port}" if $DEBUG
       @pid = nil
     end
+  end
 
-    def call(env)
-      @lock.synchronize do 
-        @concurrent_connections += 1
-        @connections += 1
-        if @max_concurrent_connections < @concurrent_connections
-          @max_concurrent_connections = @concurrent_connections
-        end
-        @need_update = true 
-      end
+  class DelayBackend < MongrelBackend
 
+    def initialize(delay)
+      @delay = delay
+      super()
+    end
+
+    def real_call(env)
       status = 200
       sleep @delay
       body = "The time is #{Time.now}\n"
-
       [status, {"Content-Type" => "text/plain"}, body]
-
-    ensure
-      @lock.synchronize do 
-        @need_update = true 
-        @concurrent_connections -= 1;
-      end
     end
   end
 
   class NoResponseBackend < DelayBackend
     def initialize
       super(99999999)
+    end
+  end
+
+  class PostCheckBackend < MongrelBackend
+    def real_call(env)
+      h = {"Content-Type" => "text/plain"}
+      if env['PATH_INFO'] =~ %r{post_check/(\d+)}
+        expected_size = $1.to_i
+        content_length = env['CONTENT_LENGTH'].to_i
+        if content_length == expected_size 
+          return [200, h, "content-length matches\n"]
+        else
+          return [300, h, "wrong size. got #{content_length}\n"]
+        end
+      end
+
+      if env['PATH_INFO'] =~ %r{sleep/(\d+)}
+        wait_time = $1.to_i
+        sleep wait_time
+      end
+
+      [200, h, "okay\n"]
     end
   end
 
