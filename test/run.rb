@@ -1,7 +1,11 @@
 require File.dirname(__FILE__) + '/maxconn_test'
-DELAY = 2.4
-backend = MaxconnTest::ClosingBackend.new(DELAY)
-test_nginx([backend], 
+DELAY = 9
+#backends= [MaxconnTest::ClosingBackend.new(DELAY)]
+
+backends = []
+1.times { backends << MaxconnTest::DelayBackend.new(DELAY) }
+
+test_nginx(backends, 
     :max_connections => 1,
     :worker_processes => 1,
     :use_ssl => false
