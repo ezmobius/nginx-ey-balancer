@@ -190,10 +190,9 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
 static void
 max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
 {
-  if(ngx_queue_empty(&maxconn_cf->waiting_requests)) 
-    return;
-
-  assert(!max_connections_upstreams_all_occupied(maxconn_cf));
+  if( ngx_queue_empty(&maxconn_cf->waiting_requests) 
+   || max_connections_upstreams_all_occupied(maxconn_cf)
+    ) return;
 
   ngx_queue_t *last = ngx_queue_last(&maxconn_cf->waiting_requests);
 
@@ -211,6 +210,8 @@ max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
                 , "max_connections: dispatch"
                 );
   ngx_http_upstream_connect(r, r->upstream);
+
+  max_connections_dispatch (maxconn_cf);
 }
 
 static void
@@ -239,7 +240,7 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
       peer_data->backend = NULL;
       ngx_add_timer((&backend->disconnect_event), 500);
     }
-    return;
+    goto dispatch;
   }
 
   if(pc) pc->tries--;
@@ -276,8 +277,9 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
     peer_data->backend = NULL;
     assert(backend->connections > 0);
     backend->connections--; /* free the slot */
-    max_connections_dispatch(backend->maxconn_cf);
   }
+dispatch:
+  max_connections_dispatch(peer_data->maxconn_cf);
 }
 
 static ngx_int_t
@@ -294,8 +296,10 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
     max_connections_find_rotate_upstream(maxconn_cf);
   assert(backend != NULL && "should always be an availible backend in max_connections_peer_get()");
   assert(backend->connections < maxconn_cf->max_connections);
+  assert(peer_data->backend == NULL);
 
   peer_data->backend = backend;
+  backend->connections++; /* keep track of how many slots are occupied */
 
   pc->sockaddr = backend->sockaddr;
   pc->socklen  = backend->socklen;
@@ -308,7 +312,7 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
                 , pc->name
                 , backend->connections
                 );
-  backend->connections++; /* keep track of how many slots are occupied */
+  max_connections_dispatch(peer_data->maxconn_cf);
   return NGX_OK;
 }
 
@@ -331,19 +335,17 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
   r->upstream->peer.tries = 1; /* FIXME - set to maxconn_cf->backends->nelts ?*/
   r->upstream->peer.data  = peer_data;
 
-  if(max_connections_upstreams_all_occupied(maxconn_cf)) {
-    ngx_queue_insert_head(&maxconn_cf->waiting_requests, &peer_data->queue);
-    /* XXX set a timer on the queued request? */
-    ngx_log_debug1( NGX_LOG_DEBUG_HTTP
-                  , r->connection->log
-                  , 0
-                  , "max_connections add queue (new size %ui)"
-                  , max_connections_queue_size(maxconn_cf)
-                  );
-    return NGX_BUSY;
-  }
-  peer_data->queue.prev = peer_data->queue.next = NULL; /* TODO HACKY NULL ASSIGNMENT */
-  return NGX_OK;
+  ngx_queue_insert_head(&maxconn_cf->waiting_requests, &peer_data->queue);
+  /* XXX set a timer on the queued request? */
+  ngx_log_debug1( NGX_LOG_DEBUG_HTTP
+                , r->connection->log
+                , 0
+                , "max_connections add queue (new size %ui)"
+                , max_connections_queue_size(maxconn_cf)
+                );
+
+  max_connections_dispatch(peer_data->maxconn_cf);
+  return NGX_BUSY;
 }
 
 static ngx_int_t
