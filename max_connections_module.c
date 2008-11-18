@@ -96,6 +96,21 @@ max_connections_queue_size (max_connections_srv_conf_t *maxconn_cf)
   return queue_size;
 }
 
+static void
+max_connections_remove_from_queue (max_connections_peer_data_t *peer_data)
+{
+  if(peer_data->queue.next != NULL) { 
+    ngx_queue_remove(&peer_data->queue);
+    peer_data->queue.prev = peer_data->queue.next = NULL; 
+    ngx_log_debug0( NGX_LOG_DEBUG_HTTP
+                  , peer_data->r->connection->log
+                  , 0
+                  , "max_connections: del queue (new size %ui)"
+                  , max_connections_queue_size(peer_data->maxconn_cf)
+                  );
+  }
+}
+
 /* This is function selects an open backend. It is not called directly
  * rather <max_connections_upstreams_all_occupied> and
  * <max_connections_find_rotate_upstream> are used. It simply iterates
@@ -131,14 +146,11 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
      || backend->down
       ) continue;
 
-    if(backend->connections < min_backend_connections) {
+    if(backend->connections <= min_backend_connections) {
       min_backend_connections = backend->connections;
       min_backend_index = index;
     }
   }
-
-  if(min_backend_connections == MAXCONN_BIGNUM)
-    return NULL;
 
   assert(min_backend_connections <= maxconn_cf->max_connections && "the minimum connections that we have found should be less than the global setting!");
   assert(min_backend_index < nbackends);
@@ -185,11 +197,9 @@ max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
 
   ngx_queue_t *last = ngx_queue_last(&maxconn_cf->waiting_requests);
 
-  ngx_queue_remove(last);
-  last->prev = last->next = NULL; /* TODO HACKY NULL ASSIGNMENT */
-
   max_connections_peer_data_t *peer_data = 
     ngx_queue_data(last, max_connections_peer_data_t, queue);
+  max_connections_remove_from_queue(peer_data);
   ngx_http_request_t *r = peer_data->r;
 
   assert(!r->connection->destroyed);
@@ -223,9 +233,7 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
   if(peer_data->r->connection->error) {
     /* set a small timeout on the backend slot so that it has time to
      * recover from the client closure */
-    if(peer_data->queue.next != NULL) { /* TODO HACKY NULL ASSIGNMENT */
-      ngx_queue_remove(&peer_data->queue);
-    }
+    max_connections_remove_from_queue(peer_data);
     pc->tries = 0;
     if(backend && !backend->disconnect_event.timer_set) {
       peer_data->backend = NULL;
