@@ -317,7 +317,11 @@ module MaxconnTest
     end
 
     def shutdown
-      %x{pkill -f nginx}
+      %x{fuser -s -k #{logfile}}
+      if $?.exitstatus != 0
+        puts "problem killing nginx"
+        exit 1
+      end
       $stderr.puts "killed nginx" if $DEBUG
     end
 
