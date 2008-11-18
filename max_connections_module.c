@@ -300,13 +300,11 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
 
   if(pc) pc->tries--;
 
-  /* previous connection successful */
-  if(state == 0) {
-  } else {
-    /* previous connection failed (state & NGX_PEER_FAILED) or either the
-     * connection failed, or it succeeded but the application returned an
-     * error (state & NGX_PEER_NEXT) 
-     */ 
+  /* previous connection failed (state & NGX_PEER_FAILED) or either the
+   * connection failed, or it succeeded but the application returned an
+   * error (state & NGX_PEER_NEXT) 
+   */ 
+  if(state != 0) {
     assert(backend);
     ngx_log_debug1( NGX_LOG_DEBUG_HTTP
                   , pc->log
@@ -326,8 +324,6 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
                   , backend->name
                   , backend->connections
                   );
-
-    /* dispatch */
     peer_data->backend = NULL;
     assert(backend->connections > 0);
     backend->connections--; /* free the slot */
@@ -342,7 +338,6 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
   max_connections_peer_data_t *peer_data = data;
   max_connections_srv_conf_t *maxconn_cf = peer_data->maxconn_cf;
 
-  /* TODO HACKY NULL ASSIGNMENT */
   assert(peer_data->queue.next == NULL && "should not be in the queue");
   assert(peer_data->queue.prev == NULL && "should not be in the queue");
 

@@ -19,13 +19,13 @@ compile: .nginx/sbin/nginx
 test/tmp:
 	mkdir test/tmp
 
-FAIL="\033[1;31m FAIL\033[m"
-PASS="\033[1;32m PASS\033[m"
+FAIL=ruby -e 'puts "\033[1;31m FAIL\033[m"'
+PASS=ruby -e 'puts "\033[1;32m PASS\033[m"'
 
 test: .nginx/sbin/nginx test/tmp
 	@for i in test/test_*; do \
 	  echo -n "$$i: ";	\
-		ruby $$i && echo -e $(PASS) || echo -e $(FAIL);	\
+		ruby $$i && $(PASS) || $(FAIL); \
 	done 
 
 clean:
