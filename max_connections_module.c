@@ -100,6 +100,7 @@ max_connections_queue_size (max_connections_srv_conf_t *maxconn_cf)
 {
   ngx_queue_t *node;
   ngx_uint_t queue_size = 0;
+  /* TODO O(n) could be O(1) */
   for( node = maxconn_cf->waiting_requests.next
      ; node && node != &maxconn_cf->waiting_requests 
      ; node = node->next

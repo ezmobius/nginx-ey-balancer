@@ -25,7 +25,7 @@ PASS="\033[1;32m PASS\033[m"
 test: .nginx/sbin/nginx test/tmp
 	@for i in test/test_*; do \
 	  echo -n "$$i: ";	\
-		ruby $$i && echo $(PASS) || echo $(FAIL);	\
+		ruby $$i && echo -e $(PASS) || echo -e $(FAIL);	\
 	done 
 
 clean:
