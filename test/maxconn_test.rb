@@ -48,19 +48,8 @@ end
 
 
 def test_nginx(backends, options ={})
-  max_connections  = options[:max_connections]  || 1
-  worker_processes = options[:worker_processes] || 1
-  if options.has_key?(:use_ssl)
-    use_ssl = options[:use_ssl] 
-  else
-    use_ssl = false
-  end
 
-  nginx = MaxconnTest::Nginx.new(backends,
-    :max_connections => max_connections,
-    :worker_processes => worker_processes,
-    :use_ssl => use_ssl
-  )
+  nginx = MaxconnTest::Nginx.new(backends, options)
   nginx.start
   yield(nginx)
 
@@ -85,16 +74,6 @@ module MaxconnTest
   DIR       = File.dirname(__FILE__)
   TMPDIR    = DIR / "tmp"
   NGINX_BIN = DIR / "../.nginx/sbin/nginx"
-  DEFAULTS = {
-    :port                => 8000,
-    :nbackends           => 4,
-    :req_per_backend     => 40,
-    :max_connections     => 3,
-    :worker_processes    => 3,
-    :use_ssl             => false,
-    :nginx_conf_filename => "nginx.conf",
-    :nginx_log_filename  => "nginx.log"
-  }
 
   class Backend # abstract
     attr_reader :port
@@ -227,7 +206,7 @@ module MaxconnTest
   end
 
   class ClosingBackend < Backend
-    def initialize(delay)
+    def initialize(delay = 0)
       @delay = delay
       super()
     end
@@ -313,7 +292,7 @@ module MaxconnTest
     attr_reader :backends
     def initialize(backends, options = {})
       @backends = backends
-      @options = DEFAULTS.merge(options)
+      @options = options
     end
 
     def shutdown
@@ -338,33 +317,7 @@ module MaxconnTest
       $stderr.puts "nginx running on #{port}" if $DEBUG
       wait_for_server_to_open_on port
     end
-   
-    def apache_bench(options)
-      path = options[:path] || "/"
-      requests = options[:requests] || 500
-      concurrency = options[:concurrency] || 50
-      concurrency = requests - 1 if concurrency > requests
-      out = %x{ab -q -c #{concurrency} -n #{requests}  #{use_ssl? ? "https" : "http"}://localhost:#{port}#{path}}
-      if $?.exitstatus != 0 
-        $stderr.puts "ab failed"
-        $stderr.puts out
-        exit 1
-      end
-
-      unless out =~ /Complete requests:\ *(\d+)/
-        $stderr.puts "ab failed"
-        $stderr.puts out
-        exit 1
-      end
-
-      complete_requests = $1.to_i
-
-      if complete_requests != requests
-        $stderr.puts "only had #{complete_requests} of #{requests}"
-        exit 1
-      end
-    end
-
+  
     def use_ssl?
       @options[:use_ssl]
     end
@@ -378,23 +331,27 @@ module MaxconnTest
     end
 
     def conffile
-      TMPDIR / @options[:nginx_conf_filename]
+      TMPDIR / "nginx.conf"
     end
 
     def logfile
-      TMPDIR / @options[:nginx_log_filename]
+      TMPDIR / "nginx.log"
     end
 
     def port
-      @options[:port]
+      @options[:port] || 8000
     end
 
     def worker_processes
-      @options[:worker_processes]
+      @options[:worker_processes] || 1
     end
 
     def max_connections
-      @options[:max_connections]
+      @options[:max_connections] || 1
+    end
+
+    def fail_timeout
+      @options[:backend_timeouts] || 10
     end
 
     def write_config

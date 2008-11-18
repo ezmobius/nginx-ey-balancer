@@ -10,9 +10,12 @@
 #include <ngx_http_upstream.h>
 #include <assert.h>
 
-/* 10 seconds until queued requests are dropped */
+/* 5 seconds until queued requests are dropped */
 /* (probably should be much less) */
-#define MAX_CONNECTIONS_QUEUE_TIMEOUT ((time_t)10)  
+#define MAX_CONNECTIONS_QUEUE_TIMEOUT ((time_t)5)  
+
+/* every 1 second the queued is checked */
+#define MAX_CONNECTIONS_QUEUE_CHECK_INT ((ngx_msec_t)1000)
 
 /* 0.5 seconds a backend is reset after client half-close */
 #define MAX_CONNECTIONS_RESET_BACKEND_TIMEOUT ((ngx_msec_t)500)  
@@ -117,7 +120,7 @@ max_connections_remove_from_queue (max_connections_peer_data_t *peer_data)
     ngx_log_debug1( NGX_LOG_DEBUG_HTTP
                   , peer_data->r->connection->log
                   , 0
-                  , "max_connections: del queue (new size %ui)"
+                  , "max_connections del queue (new size %ui)"
                   , max_connections_queue_size(peer_data->maxconn_cf)
                   );
     return 1;
@@ -207,14 +210,17 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
 static void
 max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
 {
-  if( ngx_queue_empty(&maxconn_cf->waiting_requests) 
-   || max_connections_upstreams_all_occupied(maxconn_cf)
-    ) return;
+  if(ngx_queue_empty(&maxconn_cf->waiting_requests)) return;
 
-  /* before we dispatch lets check the queue for expired stuff */
+  /* make sure that the check queue timer is set when we have things in the
+   * queue */
   if(!maxconn_cf->check_queue_event.timer_set) {
-    ngx_add_timer((&maxconn_cf->check_queue_event), 1000); 
+    ngx_add_timer( (&maxconn_cf->check_queue_event)
+                 , MAX_CONNECTIONS_QUEUE_CHECK_INT
+                 ); 
   }
+  
+  if(max_connections_upstreams_all_occupied(maxconn_cf)) return;
 
   ngx_queue_t *last = ngx_queue_last(&maxconn_cf->waiting_requests);
 
@@ -229,11 +235,11 @@ max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
   ngx_log_debug0( NGX_LOG_DEBUG_HTTP
                 , r->connection->log
                 , 0
-                , "max_connections: dispatch"
+                , "max_connections dispatch"
                 );
   ngx_http_upstream_connect(r, r->upstream);
 
-  max_connections_dispatch (maxconn_cf);
+  max_connections_dispatch(maxconn_cf);
 }
 
 static void
@@ -251,7 +257,9 @@ max_connections_check_queue_event(ngx_event_t *ev)
 {
   max_connections_srv_conf_t *maxconn_cf = ev->data;
   ngx_queue_t *node;
+
   time_t now = ngx_time();
+
   for( node = maxconn_cf->waiting_requests.next
      ; node && node != &maxconn_cf->waiting_requests 
      ; node = node->next
@@ -259,7 +267,7 @@ max_connections_check_queue_event(ngx_event_t *ev)
   {
     max_connections_peer_data_t *peer_data = 
       ngx_queue_data(node, max_connections_peer_data_t, queue);
-    if(now - peer_data->accessed >= MAX_CONNECTIONS_QUEUE_TIMEOUT) {
+    if(now - peer_data->accessed > MAX_CONNECTIONS_QUEUE_TIMEOUT) {
       ngx_log_debug0( NGX_LOG_DEBUG_HTTP
                     , peer_data->r->connection->log
                     , 0
@@ -267,11 +275,12 @@ max_connections_check_queue_event(ngx_event_t *ev)
                     );
       max_connections_remove_from_queue(peer_data);
       ngx_http_finalize_request(peer_data->r, NGX_HTTP_INTERNAL_SERVER_ERROR);
-    }
+    }   
+    /* else break; XXX */
   }
-  if(!maxconn_cf->check_queue_event.timer_set) {
-    ngx_add_timer((&maxconn_cf->check_queue_event), 1000); 
-  }
+
+  /* try to dispatch some requets */
+  max_connections_dispatch(maxconn_cf);
 }
 
 
@@ -317,16 +326,16 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
   }
 
   if(backend) {
+    assert(backend->connections > 0);
+    backend->connections--; /* free the slot */
     ngx_log_debug2( NGX_LOG_DEBUG_HTTP
                   , peer_data->r->connection->log
                   , 0
-                  , "max_connections recv client from %V (%ui connections)"
+                  , "max_connections recv client from %V (now %ui connections)"
                   , backend->name
                   , backend->connections
                   );
     peer_data->backend = NULL;
-    assert(backend->connections > 0);
-    backend->connections--; /* free the slot */
   }
 dispatch:
   max_connections_dispatch(peer_data->maxconn_cf);
@@ -357,11 +366,10 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
   ngx_log_debug2( NGX_LOG_DEBUG_HTTP
                 , pc->log
                 , 0
-                , "max_connections sending client to %V (%ui connections)"
+                , "max_connections sending client to %V (now %ui connections)"
                 , pc->name
                 , backend->connections
                 );
-  max_connections_dispatch(peer_data->maxconn_cf);
   return NGX_OK;
 }
 

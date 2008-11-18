@@ -11,7 +11,7 @@ httperf_session = <<-EOF
 EOF
 
 backends = []
-3.times { backends << MaxconnTest::PostCheckBackend.new }
+6.times { backends << MaxconnTest::PostCheckBackend.new }
 test_nginx(backends,
   :max_connections => 2, # per backend, per worker
   :worker_processes => 3
@@ -20,7 +20,7 @@ test_nginx(backends,
   File.open(session_filename, "w+") do |f|
     f.write(httperf_session)
   end
-  out = %x{httperf --rate 60 --wsesslog=20,2,#{session_filename} --port #{nginx.port}}
+  out = %x{httperf --rate 50 --wsesslog=20,2,#{session_filename} --port #{nginx.port}}
   
   assert $?.exitstatus == 0
   results = httperf_parse_output(out)
