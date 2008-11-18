@@ -106,10 +106,11 @@ max_connections_queue_size (max_connections_srv_conf_t *maxconn_cf)
 static max_connections_backend_t*
 max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_int_t rotate)
 {
+#define MAXCONN_BIGNUM 999999
   ngx_uint_t n
            , index
-           , min_backend_index = 99999
-           , min_backend_connections = 999999 /* set to a high number */
+           , min_backend_index = MAXCONN_BIGNUM
+           , min_backend_connections = MAXCONN_BIGNUM 
            ;
   ngx_uint_t nbackends = maxconn_cf->backends->nelts;
   max_connections_backend_t *backends = maxconn_cf->backends->elts;
@@ -135,6 +136,10 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
       min_backend_index = index;
     }
   }
+
+  if(min_backend_connections == MAXCONN_BIGNUM)
+    return NULL;
+
   assert(min_backend_connections <= maxconn_cf->max_connections && "the minimum connections that we have found should be less than the global setting!");
   assert(min_backend_index < nbackends);
 
@@ -238,29 +243,33 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
      * connection failed, or it succeeded but the application returned an
      * error (state & NGX_PEER_NEXT) 
      */ 
-    ngx_log_debug1( NGX_LOG_DEBUG_HTTP
-                  , pc->log
-                  , 0
-                  , "max_connections %V failed "
-                  , backend->name
-                  );
-    peer_data->backend->accessed = ngx_time();
-    peer_data->backend->fails++;
+    if(backend) {
+      ngx_log_debug1( NGX_LOG_DEBUG_HTTP
+                    , pc->log
+                    , 0
+                    , "max_connections %V failed "
+                    , backend->name
+                    );
+      peer_data->backend->accessed = ngx_time();
+      peer_data->backend->fails++;
+    }
   }
 
-  ngx_log_debug2( NGX_LOG_DEBUG_HTTP
-                , peer_data->r->connection->log
-                , 0
-                , "max_connections recv client from %V (%ui connections)"
-                , backend->name
-                , backend->connections
-                );
+  if(backend) {
+    ngx_log_debug2( NGX_LOG_DEBUG_HTTP
+                  , peer_data->r->connection->log
+                  , 0
+                  , "max_connections recv client from %V (%ui connections)"
+                  , backend->name
+                  , backend->connections
+                  );
 
-  /* dispatch */
-  peer_data->backend = NULL;
-  assert(backend->connections > 0);
-  backend->connections--; /* free the slot */
-  max_connections_dispatch(backend->maxconn_cf);
+    /* dispatch */
+    peer_data->backend = NULL;
+    assert(backend->connections > 0);
+    backend->connections--; /* free the slot */
+    max_connections_dispatch(backend->maxconn_cf);
+  }
 }
 
 static ngx_int_t
@@ -316,6 +325,7 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
 
   if(max_connections_upstreams_all_occupied(maxconn_cf)) {
     ngx_queue_insert_head(&maxconn_cf->waiting_requests, &peer_data->queue);
+    /* XXX set a timer on the queued request? */
     ngx_log_debug1( NGX_LOG_DEBUG_HTTP
                   , r->connection->log
                   , 0

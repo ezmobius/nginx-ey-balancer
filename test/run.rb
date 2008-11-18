@@ -1,6 +1,6 @@
 require File.dirname(__FILE__) + '/maxconn_test'
-DELAY = 0.4
-backend = MaxconnTest::PostCheckBackend.new()
+DELAY = 2.4
+backend = MaxconnTest::ClosingBackend.new(DELAY)
 test_nginx([backend], 
     :max_connections => 1,
     :worker_processes => 1,

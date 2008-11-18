@@ -118,7 +118,7 @@ module MaxconnTest
       log[:requests]
     end
 
-    def call(env)
+    def increase_connections
       @lock.synchronize do 
         @concurrent_connections += 1
         @connections += 1
@@ -127,9 +127,9 @@ module MaxconnTest
         end
         @need_update = true 
       end
+    end
 
-      real_call(env)
-    ensure
+    def decrease_connections
       @lock.synchronize do 
         @need_update = true 
         @concurrent_connections -= 1;
@@ -174,7 +174,7 @@ module MaxconnTest
       File.unlink(logfile) if File.exists? logfile 
       @pid = fork do 
         File.open(logfile, "w+") do |f|
-          $stderr.puts "DelayBackend running on #{port}" if $DEBUG
+          $stderr.puts "Backend running on #{port}" if $DEBUG
           Thread.new do 
             loop do 
               @lock.synchronize do
@@ -190,9 +190,16 @@ module MaxconnTest
       end
     end
 
+    def call(env)
+      increase_connections
+      real_call(env)
+    ensure
+      decrease_connections
+    end
+
     def shutdown
       return if @pid.nil?
-      Process.kill("SIGHUP", @pid)
+      Process.kill("SIGINT", @pid)
       $stderr.puts "killed mongrel #{@port}" if $DEBUG
       @pid = nil
     end
@@ -216,6 +223,67 @@ module MaxconnTest
   class NoResponseBackend < DelayBackend
     def initialize
       super(99999999)
+    end
+  end
+
+  class ClosingBackend < Backend
+    def initialize(delay)
+      @delay = delay
+      super()
+    end
+
+    def start(port)
+      unless @pid.nil?
+        $stderr.puts "trying to start backend that is already running!"
+        shutdown
+      end
+      @port = port
+      File.unlink(logfile) if File.exists? logfile 
+      @pid = fork do 
+        File.open(logfile, "w+") do |f|
+          $stderr.puts "server running on #{port}" if $DEBUG
+          Thread.new do 
+            loop do 
+              @lock.synchronize do
+                output_stats(f) if @need_update
+                @need_update = false
+              end
+              sleep 1
+            end
+          end
+          trap("INT") { exit 0 }
+          server_loop
+        end
+      end
+    end
+
+    def server_loop
+      server = TCPServer.new(@port) 
+      while true
+        IO.select([server])
+        begin
+          client = server.accept_nonblock
+          Thread.new(client) { |c| call(c) }
+        rescue Errno::EAGAIN, Errno::ECONNABORTED, Errno::EPROTO, Errno::EINTR
+        end
+      end
+    end
+
+    def call(client)
+      s = client.read(3)
+      return false unless s == "GET" or s == "HEA" or s == "POS"
+      increase_connections
+      sleep @delay
+    ensure
+      client.close
+      decrease_connections
+    end
+
+    def shutdown
+      return if @pid.nil?
+      Process.kill("SIGINT", @pid)
+      $stderr.puts "killed server #{@port}" if $DEBUG
+      @pid = nil
     end
   end
 
