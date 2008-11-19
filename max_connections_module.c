@@ -15,17 +15,15 @@
 #define MAX_CONNECTIONS_QUEUE_TIMEOUT ((time_t)5)  
 
 /* every 1 second the queued is checked */
-#define MAX_CONNECTIONS_QUEUE_CHECK_INT ((ngx_msec_t)1000)
+#define QUEUE_CHECK_INTERVAL ((ngx_msec_t)1000)
 
 /* 0.5 seconds a backend is reset after client half-close */
-#define MAX_CONNECTIONS_RESET_BACKEND_TIMEOUT ((ngx_msec_t)500)  
+#define CLIENT_CLOSURE_SLEEP ((ngx_msec_t)500)  
 
 typedef struct {
   ngx_uint_t max_connections;
   ngx_queue_t waiting_requests;
   ngx_array_t *backends; /* backend servers */
-  /* this event is executed every 1 second and checks the queue
-   * for old requests to remove */
   ngx_event_t check_queue_event;
 } max_connections_srv_conf_t;
 
@@ -42,6 +40,7 @@ typedef struct {
   ngx_uint_t down:1;
 
   ngx_uint_t fails;
+  ngx_uint_t client_closures;
   ngx_uint_t connections;
   ngx_event_t disconnect_event;
   max_connections_srv_conf_t *maxconn_cf;
@@ -216,7 +215,7 @@ max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
    * queue */
   if(!maxconn_cf->check_queue_event.timer_set) {
     ngx_add_timer( (&maxconn_cf->check_queue_event)
-                 , MAX_CONNECTIONS_QUEUE_CHECK_INT
+                 , QUEUE_CHECK_INTERVAL
                  ); 
   }
   
@@ -231,6 +230,7 @@ max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
 
   assert(!r->connection->destroyed);
   assert(!r->connection->error);
+  assert(peer_data->backend == NULL);
 
   ngx_log_debug0( NGX_LOG_DEBUG_HTTP
                 , r->connection->log
@@ -243,11 +243,15 @@ max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
 }
 
 static void
-max_connections_disconnect_from_upstream(ngx_event_t *ev)
+recover_from_client_closure(ngx_event_t *ev)
 {
   max_connections_backend_t *backend = ev->data;
+
   assert(backend->connections > 0);
-  backend->connections--; /* free the slot */
+  assert(backend->client_closures > 0);
+
+  backend->connections -= backend->client_closures; 
+  backend->client_closures = 0;
 
   max_connections_dispatch(backend->maxconn_cf);
 }
@@ -291,19 +295,26 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
   max_connections_peer_data_t *peer_data = data;
   max_connections_backend_t *backend = peer_data->backend;
 
+  /* This happens when a client closes their connection before the request
+   * is completed */
   if(peer_data->r->connection->error) {
-    /* set a small timeout on the backend slot so that it has time to
-     * recover from the client closure */
+
+    /* If the connection is in the queue, remove it. */
     max_connections_remove_from_queue(peer_data);
-    pc->tries = 0;
-    /* TODO What happens if multiple clients on the same backend get
-     * disconnected only one of these timeout events is called. Therefore we
-     * lose a slot! Very bad.
-     */
-    if(backend && !backend->disconnect_event.timer_set) {
+    
+    /* If the connection is connected to a backend */
+    if(backend != NULL) {
+      if(!backend->disconnect_event.timer_set) {
+        assert(backend->client_closures == 0);
+        ngx_add_timer( (&backend->disconnect_event)
+                     , CLIENT_CLOSURE_SLEEP
+                     );
+      }
+      backend->client_closures++;
       peer_data->backend = NULL;
-      ngx_add_timer((&backend->disconnect_event), MAX_CONNECTIONS_RESET_BACKEND_TIMEOUT);
     }
+
+    pc->tries = 0;
     goto dispatch;
   }
 
@@ -445,7 +456,7 @@ max_connections_init(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *uscf)
       backend->weight       = server[i].down ? 0 : server[i].weight;
       backend->connections  = 0;
 
-      backend->disconnect_event.handler = max_connections_disconnect_from_upstream;
+      backend->disconnect_event.handler = recover_from_client_closure;
       backend->disconnect_event.log = cf->log;
       backend->disconnect_event.data = backend;
       backend->maxconn_cf = maxconn_cf;

@@ -1,7 +1,7 @@
 require File.dirname(__FILE__) + '/maxconn_test'
 backend = MaxconnTest::DelayBackend.new(0.9)
 test_nginx([backend],
-  :max_connections => 1, # per backend, per worker
+  :max_connections => 2, # per backend, per worker
   :worker_processes => 1
 ) do |nginx|
   # Pound the server with connections which close on the client-side
@@ -29,7 +29,7 @@ end
 #
 # The important thing is that of the 50*20=1000 connects that were
 # created only very few actually got to the backend.
-assert(backend.experienced_max_connections <= 3) 
+assert(backend.experienced_max_connections <= 4) 
 
 # TODO assert that all the connections were dropped? 
 
