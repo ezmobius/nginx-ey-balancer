@@ -1,6 +1,6 @@
-diff -Naur src/http/ngx_http_upstream.c ../nginx-0.6.32-maxconn-patch/src/http/ngx_http_upstream.c
---- src/http/ngx_http_upstream.c	2008-04-17 16:32:11.000000000 +0200
-+++ ../nginx-0.6.32-maxconn-patch/src/http/ngx_http_upstream.c	2008-11-14 12:02:30.000000000 +0100
+diff -Naur ../nginx-0.6.32/src/http/ngx_http_upstream.c src/http/ngx_http_upstream.c
+--- ../nginx-0.6.32/src/http/ngx_http_upstream.c	2008-04-17 16:32:11.000000000 +0200
++++ src/http/ngx_http_upstream.c	2008-11-14 12:02:30.000000000 +0100
 @@ -14,8 +14,6 @@
  static void ngx_http_upstream_wr_check_broken_connection(ngx_http_request_t *r);
  static void ngx_http_upstream_check_broken_connection(ngx_http_request_t *r,
@@ -49,9 +49,9 @@ diff -Naur src/http/ngx_http_upstream.c ../nginx-0.6.32-maxconn-patch/src/http/n
  ngx_http_upstream_connect(ngx_http_request_t *r, ngx_http_upstream_t *u)
  {
      ngx_int_t          rc;
-diff -Naur src/http/ngx_http_upstream.h ../nginx-0.6.32-maxconn-patch/src/http/ngx_http_upstream.h
---- src/http/ngx_http_upstream.h	2008-03-03 21:04:06.000000000 +0100
-+++ ../nginx-0.6.32-maxconn-patch/src/http/ngx_http_upstream.h	2008-11-09 20:19:11.000000000 +0100
+diff -Naur ../nginx-0.6.32/src/http/ngx_http_upstream.h src/http/ngx_http_upstream.h
+--- ../nginx-0.6.32/src/http/ngx_http_upstream.h	2008-03-03 21:04:06.000000000 +0100
++++ src/http/ngx_http_upstream.h	2008-11-09 20:19:11.000000000 +0100
 @@ -270,6 +270,7 @@
      ngx_http_variable_value_t *v, uintptr_t data);
  
