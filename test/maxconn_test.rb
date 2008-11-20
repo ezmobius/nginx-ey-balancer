@@ -296,7 +296,7 @@ module MaxconnTest
     end
 
     def shutdown
-      %x{fuser -s -k #{logfile}}
+      %x{kill `lsof -t #{logfile}`}
       if $?.exitstatus != 0
         puts "problem killing nginx"
         exit 1
