@@ -350,6 +350,10 @@ module MaxconnTest
       @options[:max_connections] || 1
     end
 
+    def queue_timeout
+      @options[:queue_timeout]
+    end
+
     def fail_timeout
       @options[:backend_timeouts] || 10
     end

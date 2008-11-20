@@ -10,10 +10,6 @@
 #include <ngx_http_upstream.h>
 #include <assert.h>
 
-/* 5 seconds until queued requests are dropped */
-/* (probably should be much less) */
-#define QUEUE_TIMEOUT ((ngx_msec_t)5500) 
-
 /* 0.5 seconds until a backend SLOT is reset after client half-close */
 #define CLIENT_CLOSURE_SLEEP ((ngx_msec_t)500)  
 
@@ -22,6 +18,7 @@ typedef struct {
   ngx_queue_t waiting_requests;
   ngx_array_t *backends; /* backend servers */
   ngx_event_t queue_check_event;
+  ngx_msec_t queue_timeout;
 } max_connections_srv_conf_t;
 
 typedef struct {
@@ -55,6 +52,7 @@ static ngx_uint_t max_connections_rr_index;
 
 /* forward declarations */
 static char * max_connections_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static char * max_connections_queue_timeout_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static void * max_connections_create_conf(ngx_conf_t *cf);
 
 #define RAMP(x) (x > 0 ? x : 0)
@@ -67,6 +65,13 @@ static ngx_command_t  max_connections_commands[] =
   , 0
   , NULL
   }
+, { ngx_string("max_connections_queue_timeout")
+  , NGX_HTTP_UPS_CONF|NGX_CONF_TAKE1
+  , max_connections_queue_timeout_command
+  , 0
+  , offsetof(max_connections_srv_conf_t, queue_timeout)
+  , NULL
+  }
 , ngx_null_command
 };
 
@@ -76,7 +81,7 @@ static ngx_http_module_t max_connections_module_ctx =
 /* create main configuration     */ , NULL 
 /* init main configuration       */ , NULL 
 /* create server configuration   */ , max_connections_create_conf 
-/* merge server configuration    */ , NULL 
+/* merge server configuration    */ , NULL
 /* create location configuration */ , NULL 
 /* merge location configuration  */ , NULL 
                                     };
@@ -163,7 +168,7 @@ queue_shift (max_connections_srv_conf_t *maxconn_cf)
     /*  ------|-----------|-------------|------------------------ */
     /*       accessed    now           accessed + TIMEOUT         */
     ngx_add_timer( (&maxconn_cf->queue_check_event)
-                 , RAMP(300 + oldest->accessed + QUEUE_TIMEOUT - ngx_current_msec)
+                 , RAMP(300 + oldest->accessed + maxconn_cf->queue_timeout - ngx_current_msec)
                  ); 
   }
 
@@ -262,10 +267,12 @@ max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
   assert(!r->connection->error);
   assert(peer_data->backend == NULL);
 
-  ngx_log_debug0( NGX_LOG_DEBUG_HTTP
+  ngx_log_debug2( NGX_LOG_DEBUG_HTTP
                 , r->connection->log
                 , 0
-                , "max_connections dispatch"
+                , "max_connections dispatch (queue timeout: %ui, maxconn: %ui)"
+                , maxconn_cf->queue_timeout
+                , maxconn_cf->max_connections
                 );
   ngx_http_upstream_connect(r, r->upstream);
 
@@ -295,7 +302,7 @@ queue_check_event(ngx_event_t *ev)
   max_connections_peer_data_t *oldest; 
 
   while ( (oldest = queue_oldest(maxconn_cf))
-       && ngx_current_msec - oldest->accessed > QUEUE_TIMEOUT
+       && ngx_current_msec - oldest->accessed > maxconn_cf->queue_timeout
         ) 
   {
     max_connections_peer_data_t *peer_data = queue_shift(maxconn_cf);
@@ -504,6 +511,33 @@ max_connections_init(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *uscf)
 }
 
 static char *
+max_connections_queue_timeout_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+  ngx_http_upstream_srv_conf_t *uscf = 
+    ngx_http_conf_get_module_srv_conf(cf, ngx_http_upstream_module);
+
+  max_connections_srv_conf_t *maxconn_cf = 
+    ngx_http_conf_upstream_srv_conf(uscf, max_connections_module);
+
+  ngx_str_t        *value; 
+
+  value = cf->args->elts;    
+
+  ngx_msec_t ms = ngx_parse_time(&value[1], 0); 
+  if (ms == (ngx_msec_t) NGX_ERROR) {
+      return "invalid value";
+  }
+
+  if (ms == (ngx_msec_t) NGX_PARSE_LARGE_TIME) {
+      return "value must be less than 597 hours";
+  }
+
+  maxconn_cf->queue_timeout = ms;
+
+  return NGX_CONF_OK;
+}
+
+static char *
 max_connections_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
   ngx_http_upstream_srv_conf_t *uscf = 
@@ -542,5 +576,7 @@ max_connections_create_conf(ngx_conf_t *cf)
     if (conf == NULL) return NGX_CONF_ERROR;
     max_connections_rr_index = 0;
     conf->max_connections = 1;
+    conf->queue_timeout = 5000;  /* default queue timeout 5 seconds */
     return conf;
 }
+
