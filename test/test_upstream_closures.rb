@@ -6,7 +6,7 @@ test_nginx(backends,
   :worker_processes => 1, 
   :backend_timeouts => 1
 ) do |nginx|
-  out = %x{httperf --num-conns 20 --hog --timeout 15 --rate 100 --port #{nginx.port}}
+  out = %x{httperf --num-conns 20 --hog --timeout 15 --rate 2 --port #{nginx.port}}
 
   # each backend will fail for 1 seconds since it closed
   # it's connection.
