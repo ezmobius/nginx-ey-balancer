@@ -576,7 +576,7 @@ max_connections_create_conf(ngx_conf_t *cf)
     if (conf == NULL) return NGX_CONF_ERROR;
     max_connections_rr_index = 0;
     conf->max_connections = 1;
-    conf->queue_timeout = 5000;  /* default queue timeout 5 seconds */
+    conf->queue_timeout = 1000;  /* default queue timeout 5 seconds */
     return conf;
 }
 

@@ -5,6 +5,7 @@ other_backends = []
 3.times { other_backends << MaxconnTest::DelayBackend.new(0.4) }
 
 test_nginx([no_response, *other_backends],
+  :queue_timeout => "10s",
   :max_connections => 2, # per backend, per worker
   :worker_processes => 1
 ) do |nginx|

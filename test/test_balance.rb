@@ -4,7 +4,8 @@ backends = []
 4.times { backends << MaxconnTest::DelayBackend.new(0.5) }
 test_nginx(backends,
   :max_connections => 2, # per backend, per worker
-  :worker_processes => 1
+  :worker_processes => 1,
+  :queue_timeout => "10s"
 ) do |nginx|
   out = %x{httperf --num-conns 200 --hog --timeout 10 --rate 20 --port #{nginx.port}}
   assert $?.exitstatus == 0

@@ -13,6 +13,7 @@ EOF
 backends = []
 6.times { backends << MaxconnTest::PostCheckBackend.new }
 test_nginx(backends,
+  :queue_timeout => "10s", 
   :max_connections => 2, # per backend, per worker
   :worker_processes => 3
 ) do |nginx|

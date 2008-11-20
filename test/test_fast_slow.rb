@@ -8,7 +8,8 @@ slow = DelayBackend.new(DELAY*2)
 
 test_nginx( [fast, slow],
   :max_connections => 2, # per backend, per worker
-  :worker_processes => 1
+  :worker_processes => 1,
+  :queue_timeout => "10s"
 ) do |nginx|
   out = %x{httperf --num-conns 150 --hog --timeout 120 --rate 10 --port #{nginx.port}}
   assert $?.exitstatus == 0
