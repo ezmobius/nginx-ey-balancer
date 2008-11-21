@@ -19,6 +19,8 @@ test_nginx(backends,
 end
 
 backends.each do |b|
-  assert_equal(1, b.experienced_max_connections) 
+  # because of forced connections the backends 
+  # might see a few more connections from the downed hosts
+  assert(b.experienced_max_connections <= 3) 
 end
 
