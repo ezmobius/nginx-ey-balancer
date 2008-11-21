@@ -2,6 +2,7 @@ require File.dirname(__FILE__) + '/maxconn_test'
 backends = []
 2.times { backends << MaxconnTest::DelayBackend.new(0.5) }
 test_nginx(backends,
+  :queue_timeout => "10s", 
   :max_connections => 1, # per backend, per worker
   :worker_processes => 1,
   :use_ssl => true
