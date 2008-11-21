@@ -1,0 +1,29 @@
+
+Usage:
+
+  upstream mongrels {
+    server 127.0.0.1:8001;
+    server 127.0.0.1:8002;
+    max_connections 2;
+    max_connections_queue_timeout 2s; # optional defaults to 1s
+  }
+
+Install:
+
+This module requires one to patch Nginx. The module also includes a Makefile
+for easily building it into Nginx and running tests. If the Makefile is used
+then the first line must be changed to point to the Nginx source tree. 
+Here is an example of how one might compile nginx with this module.
+
+  tar -zxf nginx-0.6.33.tar.gz
+  tar -xzf ngx_max_connections-0.0.1.tar.gz
+  cd nginx-0.6.33
+  patch -p0 < ../ngx_max_connections-0.0.1/nginx-0.6.33.patch
+  cd ../ngx_max_connections-0.0.1
+  vim Makefile #### edit the first line!
+  make configure
+  make
+  make test # requires ruby, rubygems, rack, httperf
+
+
+
