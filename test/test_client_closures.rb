@@ -25,11 +25,11 @@ end
 # allow the backend time to clear the connction but it could be 
 # still there.
 #
-# This is perhaps acceptable since HAproxy does the same.
+# This is, perhaps, acceptable since HAproxy does the same.
 #
 # The important thing is that of the 50*20=1000 connects that were
 # created only very few actually got to the backend.
-assert(backend.experienced_max_connections <= 4) 
+assert(backend.experienced_max_connections <= 6) 
 
 # TODO assert that all the connections were dropped? 
 
