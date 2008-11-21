@@ -2,7 +2,7 @@ require File.dirname(__FILE__) + '/maxconn_test'
 backends = []
 5.times { backends << MaxconnTest::ClosingBackend.new }
 test_nginx(backends,
-  :max_connections => 1, # per backend, per worker
+  :max_connections => 3, # per backend, per worker
   :worker_processes => 1, 
   :backend_timeouts => 1
 ) do |nginx|

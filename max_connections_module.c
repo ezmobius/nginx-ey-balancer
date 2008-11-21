@@ -115,23 +115,6 @@ queue_size (max_connections_srv_conf_t *maxconn_cf)
   return queue_size;
 }
 
-static int
-queue_remove (max_connections_peer_data_t *peer_data)
-{
-  if(peer_data->queue.next != NULL) {
-    ngx_queue_remove(&peer_data->queue);
-    peer_data->queue.prev = peer_data->queue.next = NULL; 
-    ngx_log_debug1( NGX_LOG_DEBUG_HTTP
-                  , peer_data->r->connection->log
-                  , 0
-                  , "max_connections del queue (new size %ui)"
-                  , queue_size(peer_data->maxconn_cf)
-                  );
-    return 1;
-  }
-  return 0;
-}
-
 static max_connections_peer_data_t *
 queue_oldest (max_connections_srv_conf_t *maxconn_cf)
 {
@@ -145,35 +128,77 @@ queue_oldest (max_connections_srv_conf_t *maxconn_cf)
   return peer_data;
 }
 
-/* removes the first item from the queue - returns request */
-static max_connections_peer_data_t *
-queue_shift (max_connections_srv_conf_t *maxconn_cf)
+static int
+queue_remove (max_connections_peer_data_t *peer_data)
 {
-  if(ngx_queue_empty(&maxconn_cf->waiting_requests)) 
-    return NULL;
+  max_connections_srv_conf_t *maxconn_cf = peer_data->maxconn_cf;
 
-  max_connections_peer_data_t *peer_data = queue_oldest (maxconn_cf);
+  /* return 0 if it wasn't in the queue */
+  if(peer_data->queue.next == NULL)
+    return 0;
 
-  int r = queue_remove (peer_data);
-  assert(r == 1);
+  max_connections_peer_data_t *oldest = queue_oldest (maxconn_cf);
+
+  ngx_queue_remove(&peer_data->queue);
+  peer_data->queue.prev = peer_data->queue.next = NULL; 
+  ngx_log_debug1( NGX_LOG_DEBUG_HTTP
+                , peer_data->r->connection->log
+                , 0
+                , "max_connections del queue (new size %ui)"
+                , queue_size(peer_data->maxconn_cf)
+                );
 
   if(ngx_queue_empty(&maxconn_cf->waiting_requests)) {
     /* delete the timer if the queue is empty now */
     if(maxconn_cf->queue_check_event.timer_set) {
       ngx_del_timer( (&maxconn_cf->queue_check_event) );
     }
-  } else { 
+  } else if(oldest == peer_data) {  
+    /* if the removed peer_data was the first */
     /* make sure that the check queue timer is set when we have things in
      * the queue */
-    max_connections_peer_data_t *oldest = queue_oldest (maxconn_cf);
+    oldest = queue_oldest (maxconn_cf);
+
     /*  ------|-----------|-------------|------------------------ */
     /*       accessed    now           accessed + TIMEOUT         */
     ngx_add_timer( (&maxconn_cf->queue_check_event)
-                 , RAMP(300 + oldest->accessed + maxconn_cf->queue_timeout - ngx_current_msec)
+                 , RAMP(oldest->accessed + maxconn_cf->queue_timeout - ngx_current_msec)
                  ); 
   }
 
+  return 1;
+}
+
+/* removes the first item from the queue - returns request */
+static max_connections_peer_data_t *
+queue_shift (max_connections_srv_conf_t *maxconn_cf)
+{
+  if(ngx_queue_empty(&maxconn_cf->waiting_requests)) 
+    return NULL;
+  max_connections_peer_data_t *peer_data = queue_oldest (maxconn_cf);
+
+  int r = queue_remove (peer_data);
+  assert(r == 1);
+
   return peer_data;
+}
+
+/* adds a request to the end of the queue */
+static void
+queue_push (max_connections_srv_conf_t *maxconn_cf, max_connections_peer_data_t *peer_data)
+{
+  /* if this is the first element ensure we set the queue_check_event */
+  if(ngx_queue_empty(&maxconn_cf->waiting_requests)) {
+    assert(!maxconn_cf->queue_check_event.timer_set);
+    ngx_add_timer((&maxconn_cf->queue_check_event), maxconn_cf->queue_timeout); 
+  }
+  ngx_queue_insert_head(&maxconn_cf->waiting_requests, &peer_data->queue);
+  ngx_log_debug1( NGX_LOG_DEBUG_HTTP
+                , peer_data->r->connection->log
+                , 0
+                , "max_connections add queue (new size %ui)"
+                , queue_size(maxconn_cf)
+                );
 }
 
 /* This is function selects an open backend. It simply iterates through the
@@ -238,12 +263,12 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, int 
 /* This function takes the oldest request on the queue
  * (maxconn_cf->waiting_requests) and dispatches it to the backends.  This
  * calls ngx_http_upstream_connect() which will in turn call the peer get
- * callback, max_connections_peer_get(). max_connections_peer_get() will do
+ * callback, peer_get(). peer_get() will do
  * the actual selection of backend. Here we're just giving the request the
  * go-ahead to proceed.
  */
 static void
-max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
+dispatch (max_connections_srv_conf_t *maxconn_cf)
 {
   if(ngx_queue_empty(&maxconn_cf->waiting_requests)) return;
   if(upstreams_are_all_occupied(maxconn_cf)) return;
@@ -265,7 +290,7 @@ max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
   ngx_http_upstream_connect(r, r->upstream);
 
   /* can we dispatch again? */
-  max_connections_dispatch(maxconn_cf);
+  dispatch(maxconn_cf);
 }
 
 static void
@@ -279,7 +304,7 @@ recover_from_client_closure(ngx_event_t *ev)
   backend->connections -= backend->client_closures; 
   backend->client_closures = 0;
 
-  max_connections_dispatch(backend->maxconn_cf);
+  dispatch(backend->maxconn_cf);
 }
 
 static void
@@ -304,13 +329,21 @@ queue_check_event(ngx_event_t *ev)
   }
 
   /* try to dispatch some requets */
-  max_connections_dispatch(maxconn_cf);
+  dispatch(maxconn_cf);
+
+  /* check the check timer */
+  if( !ngx_queue_empty(&maxconn_cf->waiting_requests) 
+   && !maxconn_cf->queue_check_event.timer_set
+    ) 
+  {
+    ngx_add_timer((&maxconn_cf->queue_check_event), maxconn_cf->queue_timeout); 
+  }
 }
 
 
 /* The peer free function which is part of all NGINX upstream modules */
 static void
-max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t state)
+peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t state)
 {
   max_connections_peer_data_t *peer_data = data;
   max_connections_backend_t *backend = peer_data->backend;
@@ -375,10 +408,15 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
 
     if(upstreams_are_all_dead(maxconn_cf)) {
       pc->tries = 0; /* kill this request */
+      ngx_log_debug0( NGX_LOG_DEBUG_HTTP
+                    , pc->log
+                    , 0
+                    , "max_connections all backends are dead. killing request."
+                    );
     }
 
     return;
-  }  
+  }
 
   /*
   if (state & NGX_PEER_NEXT) {
@@ -389,11 +427,11 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
   peer_data->backend = NULL;
 
 dispatch:
-  max_connections_dispatch(maxconn_cf);
+  dispatch(maxconn_cf);
 }
 
 static ngx_int_t
-max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
+peer_get (ngx_peer_connection_t *pc, void *data)
 {
   max_connections_peer_data_t *peer_data = data;
   max_connections_srv_conf_t *maxconn_cf = peer_data->maxconn_cf;
@@ -403,7 +441,7 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
 
   max_connections_backend_t *backend = 
     max_connections_find_open_upstream(maxconn_cf, peer_data->really_needs_backend);
-  assert(backend != NULL && "should always be an availible backend in max_connections_peer_get()");
+  assert(backend != NULL && "should always be an availible backend in peer_get()");
   //assert(backend->connections < maxconn_cf->max_connections);
   assert(peer_data->backend == NULL);
 
@@ -425,7 +463,7 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
 }
 
 static ngx_int_t
-max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *uscf)
+peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *uscf)
 {
   max_connections_srv_conf_t *maxconn_cf = 
     ngx_http_conf_upstream_srv_conf(uscf, max_connections_module);
@@ -440,19 +478,13 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
   peer_data->accessed = ngx_current_msec; 
   peer_data->really_needs_backend = 0;
 
-  r->upstream->peer.free  = max_connections_peer_free;
-  r->upstream->peer.get   = max_connections_peer_get;
+  r->upstream->peer.free  = peer_free;
+  r->upstream->peer.get   = peer_get;
   r->upstream->peer.tries = maxconn_cf->backends->nelts;
   r->upstream->peer.data  = peer_data;
 
-  ngx_queue_insert_head(&maxconn_cf->waiting_requests, &peer_data->queue);
-  ngx_log_debug1( NGX_LOG_DEBUG_HTTP
-                , r->connection->log
-                , 0
-                , "max_connections add queue (new size %ui)"
-                , queue_size(maxconn_cf)
-                );
-  max_connections_dispatch(peer_data->maxconn_cf);
+  queue_push(maxconn_cf, peer_data);
+  dispatch(peer_data->maxconn_cf);
   return NGX_BUSY;
 }
 
@@ -504,7 +536,7 @@ max_connections_init(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *uscf)
   }
   maxconn_cf->backends = backends;
 
-  uscf->peer.init = max_connections_peer_init;
+  uscf->peer.init = peer_init;
 
   ngx_queue_init(&maxconn_cf->waiting_requests);
   assert(ngx_queue_empty(&maxconn_cf->waiting_requests));
