@@ -175,18 +175,13 @@ queue_shift (max_connections_srv_conf_t *maxconn_cf)
   return peer_data;
 }
 
-/* This is function selects an open backend. It is not called directly
- * rather <max_connections_upstreams_all_occupied> and
- * <max_connections_find_rotate_upstream> are used. It simply iterates
- * through the backends looking for the one with the least connections. The
- * global (process-wide) variable <max_connections_rr_index> is used so that
- * the iteration always starts at a different place.
- */
+/* This is function selects an open backend. It simply iterates through the
+ * backends looking for the one with the least connections. */
 static max_connections_backend_t*
-max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_int_t rotate)
+max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf)
 {
 #define MAXCONN_BIGNUM 999999
-  ngx_uint_t n
+  ngx_uint_t c
            , index
            , min_backend_index = MAXCONN_BIGNUM
            , min_backend_connections = MAXCONN_BIGNUM 
@@ -194,21 +189,20 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
   ngx_uint_t nbackends = maxconn_cf->backends->nelts;
   max_connections_backend_t *backends = maxconn_cf->backends->elts;
   time_t now = ngx_time();
-  for(n = 0; n < nbackends; n++) {
-    /* we're just iterating through the backends. the strange index
-     * is so that we always start a new place in the array and not 
-     * at the beginning. this insures that backends are used evenly.
-     */
-    index = (n + max_connections_rr_index) % nbackends;
+
+  for( c = 0, index = ngx_random() % nbackends
+     ; c < nbackends
+     ; c++, index = (index + 1) % nbackends
+     )
+  {
     max_connections_backend_t *backend = &backends[index];
 
     if(now - backend->accessed > backend->fail_timeout) {
       backend->fails = 0;
     }
 
-    if( backend->fails >= backend->max_fails
-     || backend->down
-      ) continue;
+    if(backend->fails >= backend->max_fails || backend->down) 
+      continue;
 
     if(backend->connections < min_backend_connections) {
       min_backend_connections = backend->connections;
@@ -223,16 +217,14 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
   assert(min_backend_index < nbackends);
 
   max_connections_backend_t *choosen = &backends[min_backend_index];
+
   assert(choosen->connections == min_backend_connections);
   assert(!choosen->down);
   assert(choosen->fails < choosen->max_fails);
 
-  if(rotate)
-    /* increase the index that we start our iteration at */
-    max_connections_rr_index = (1 + max_connections_rr_index) % nbackends;
-
   if(choosen->connections == maxconn_cf->max_connections) 
     return NULL; /* no open slots */
+
   assert(choosen->connections < maxconn_cf->max_connections);
 
   return choosen;
@@ -240,12 +232,7 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, ngx_
 
 /* Returns true if there are no slots to send a request to. */
 #define max_connections_upstreams_all_occupied(maxconn_cf) \
-  (max_connections_find_open_upstream (maxconn_cf, 0) == NULL)
-
-/* finds a backend slot and inceases <max_connections_rr_index>.
- * Returns NULL if none are found. */
-#define max_connections_find_rotate_upstream(maxconn_cf) \
-  max_connections_find_open_upstream (maxconn_cf, 1)
+  (max_connections_find_open_upstream (maxconn_cf) == NULL)
 
 /* This function takes the oldest request on the queue
  * (maxconn_cf->waiting_requests) and dispatches it to the backends.  This
@@ -352,23 +339,8 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
     goto dispatch;
   }
 
-  if(pc) pc->tries--;
-
-  /* previous connection failed (state & NGX_PEER_FAILED) or either the
-   * connection failed, or it succeeded but the application returned an
-   * error (state & NGX_PEER_NEXT) 
-   */ 
-  if(state != 0) {
-    assert(backend);
-    ngx_log_debug1( NGX_LOG_DEBUG_HTTP
-                  , pc->log
-                  , 0
-                  , "max_connections %V failed "
-                  , backend->name
-                  );
-    peer_data->backend->accessed = ngx_time();
-    peer_data->backend->fails++;
-  }
+  if(pc) 
+    pc->tries--;
 
   if(backend) {
     assert(backend->connections > 0);
@@ -380,8 +352,32 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
                   , backend->name
                   , backend->connections
                   );
-    peer_data->backend = NULL;
   }
+
+  /* previous connection failed (state & NGX_PEER_FAILED) or either the
+   * connection failed, or it succeeded but the application returned an
+   * error (state & NGX_PEER_NEXT) 
+   */ 
+  if(state & NGX_PEER_FAILED) {
+    ngx_log_debug1( NGX_LOG_DEBUG_HTTP
+                  , pc->log
+                  , 0
+                  , "max_connections %V failed "
+                  , backend->name
+                  );
+    peer_data->backend->accessed = ngx_time();
+    peer_data->backend->fails++;
+  } else if (state & NGX_PEER_NEXT) {
+    assert(0 && "TODO just get the next host");
+  }
+
+  peer_data->backend = NULL;
+
+  if(state != 0) {
+    return;
+  }
+
+
 dispatch:
   max_connections_dispatch(maxconn_cf);
 }
@@ -396,7 +392,7 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
   assert(peer_data->queue.prev == NULL && "should not be in the queue");
 
   max_connections_backend_t *backend = 
-    max_connections_find_rotate_upstream(maxconn_cf);
+    max_connections_find_open_upstream(maxconn_cf);
   assert(backend != NULL && "should always be an availible backend in max_connections_peer_get()");
   assert(backend->connections < maxconn_cf->max_connections);
   assert(peer_data->backend == NULL);
@@ -435,7 +431,7 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
 
   r->upstream->peer.free  = max_connections_peer_free;
   r->upstream->peer.get   = max_connections_peer_get;
-  r->upstream->peer.tries = 1; /* FIXME - set to maxconn_cf->backends->nelts ?*/
+  r->upstream->peer.tries = maxconn_cf->backends->nelts;
   r->upstream->peer.data  = peer_data;
 
   ngx_queue_insert_head(&maxconn_cf->waiting_requests, &peer_data->queue);
