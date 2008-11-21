@@ -138,6 +138,20 @@ module MaxconnTest
     end
   end
 
+  class NonBackend < Backend
+    def start(port)
+      @port = port
+    end
+
+    def shutdown
+      ;
+    end
+
+    def log
+      {:max_connections => 0, :requests => 0}
+    end
+  end
+
   class MongrelBackend < Backend
 
     def initialize
@@ -296,7 +310,7 @@ module MaxconnTest
     end
 
     def shutdown
-      %x{kill `lsof -t #{logfile}`}
+      %x{killall nginx}
       if $?.exitstatus != 0
         puts "problem killing nginx"
         exit 1
@@ -308,7 +322,9 @@ module MaxconnTest
       p = port + 1 # for assigning ports to the backend
       backends.each do |backend|
         backend.start(p)
-        wait_for_server_to_open_on backend.port
+        unless backend.kind_of?(NonBackend)
+          wait_for_server_to_open_on(backend.port) 
+        end
         p += 1
       end
       write_config
