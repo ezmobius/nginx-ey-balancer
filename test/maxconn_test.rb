@@ -85,7 +85,7 @@ module MaxconnTest
       @concurrent_connections = 0
       @connections = 0
       @max_concurrent_connections = 0
-      @need_update = true
+      @need_update = false
       @lock = Mutex.new
     end
 
@@ -310,7 +310,7 @@ module MaxconnTest
     end
 
     def shutdown
-      %x{killall nginx}
+      %x{kill #{@master_pid}}
       if $?.exitstatus != 0
         puts "problem killing nginx"
         exit 1
@@ -331,7 +331,12 @@ module MaxconnTest
       File.unlink(logfile) if File.exists? logfile
       %x{#{NGINX_BIN} -c #{conffile}} 
       $stderr.puts "nginx running on #{port}" if $DEBUG
+
       wait_for_server_to_open_on port
+
+      @master_pid = %x{lsof -t #{logfile}}.split.first
+      raise "problem getting nginx pid" if @master_pid.nil?
+
     end
   
     def use_ssl?
