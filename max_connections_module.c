@@ -46,6 +46,7 @@ typedef struct {
   ngx_queue_t queue; /* queue information */
   ngx_http_request_t *r; /* the request associated with the peer */
   ngx_msec_t accessed;
+  ngx_uint_t really_needs_backend:1;
 } max_connections_peer_data_t;
 
 static ngx_uint_t max_connections_rr_index;
@@ -178,7 +179,7 @@ queue_shift (max_connections_srv_conf_t *maxconn_cf)
 /* This is function selects an open backend. It simply iterates through the
  * backends looking for the one with the least connections. */
 static max_connections_backend_t*
-max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf)
+max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, int forced)
 {
 #define MAXCONN_BIGNUM 999999
   ngx_uint_t c
@@ -210,10 +211,10 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf)
     }
   }
 
+  /* there weren't even any backends to look at */
   if(min_backend_connections == MAXCONN_BIGNUM)
     return NULL;
 
-  assert(min_backend_connections <= maxconn_cf->max_connections && "the minimum connections that we have found should be less than the global setting!");
   assert(min_backend_index < nbackends);
 
   max_connections_backend_t *choosen = &backends[min_backend_index];
@@ -222,17 +223,17 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf)
   assert(!choosen->down);
   assert(choosen->fails < choosen->max_fails);
 
-  if(choosen->connections == maxconn_cf->max_connections) 
+  if(!forced && choosen->connections >= maxconn_cf->max_connections) 
     return NULL; /* no open slots */
-
-  assert(choosen->connections < maxconn_cf->max_connections);
 
   return choosen;
 }
 
 /* Returns true if there are no slots to send a request to. */
-#define max_connections_upstreams_all_occupied(maxconn_cf) \
-  (max_connections_find_open_upstream (maxconn_cf) == NULL)
+#define upstreams_are_all_occupied(maxconn_cf) \
+  (max_connections_find_open_upstream (maxconn_cf, 0) == NULL)
+#define upstreams_are_all_dead(maxconn_cf) \
+  (max_connections_find_open_upstream (maxconn_cf, 1) == NULL)
 
 /* This function takes the oldest request on the queue
  * (maxconn_cf->waiting_requests) and dispatches it to the backends.  This
@@ -245,7 +246,7 @@ static void
 max_connections_dispatch (max_connections_srv_conf_t *maxconn_cf)
 {
   if(ngx_queue_empty(&maxconn_cf->waiting_requests)) return;
-  if(max_connections_upstreams_all_occupied(maxconn_cf)) return;
+  if(upstreams_are_all_occupied(maxconn_cf)) return;
 
   max_connections_peer_data_t *peer_data = queue_shift(maxconn_cf);
   ngx_http_request_t *r = peer_data->r;
@@ -367,16 +368,25 @@ max_connections_peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t sta
                   );
     peer_data->backend->accessed = ngx_time();
     peer_data->backend->fails++;
-  } else if (state & NGX_PEER_NEXT) {
+    peer_data->backend = NULL;
+
+    /* this forces a backend even if it's maxconn is full */
+    peer_data->really_needs_backend = 1; 
+
+    if(upstreams_are_all_dead(maxconn_cf)) {
+      pc->tries = 0; /* kill this request */
+    }
+
+    return;
+  }  
+
+  /*
+  if (state & NGX_PEER_NEXT) {
     assert(0 && "TODO just get the next host");
   }
+  */
 
   peer_data->backend = NULL;
-
-  if(state != 0) {
-    return;
-  }
-
 
 dispatch:
   max_connections_dispatch(maxconn_cf);
@@ -392,9 +402,9 @@ max_connections_peer_get (ngx_peer_connection_t *pc, void *data)
   assert(peer_data->queue.prev == NULL && "should not be in the queue");
 
   max_connections_backend_t *backend = 
-    max_connections_find_open_upstream(maxconn_cf);
+    max_connections_find_open_upstream(maxconn_cf, peer_data->really_needs_backend);
   assert(backend != NULL && "should always be an availible backend in max_connections_peer_get()");
-  assert(backend->connections < maxconn_cf->max_connections);
+  //assert(backend->connections < maxconn_cf->max_connections);
   assert(peer_data->backend == NULL);
 
   peer_data->backend = backend;
@@ -428,6 +438,7 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
   peer_data->maxconn_cf = maxconn_cf;
   peer_data->r = r;
   peer_data->accessed = ngx_current_msec; 
+  peer_data->really_needs_backend = 0;
 
   r->upstream->peer.free  = max_connections_peer_free;
   r->upstream->peer.get   = max_connections_peer_get;
@@ -441,7 +452,6 @@ max_connections_peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *
                 , "max_connections add queue (new size %ui)"
                 , queue_size(maxconn_cf)
                 );
-
   max_connections_dispatch(peer_data->maxconn_cf);
   return NGX_BUSY;
 }

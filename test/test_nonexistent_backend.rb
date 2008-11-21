@@ -13,7 +13,6 @@ test_nginx( [delay, non],
   out = %x{httperf --num-conns 150 --hog --timeout 120 --rate 10 --port #{nginx.port}}
   assert $?.exitstatus == 0
   results = httperf_parse_output(out)
-  p results
   assert_equal 150, results["2xx"]
 end
 
@@ -21,6 +20,9 @@ end
 # expect that fast handles 100 and slow handles 50
 assert_equal 150, delay.experienced_requests 
 assert_equal 0, non.experienced_requests 
-assert_equal 2, delay.experienced_max_connections
+# In the case that a backend goes down the module must find a place for
+# dispatched requests sent to the downed backend. In this extraordinary case
+# it's possible the max connections can go above the set amount.
+assert delay.experienced_max_connections <= 4
 assert_equal 0, non.experienced_max_connections
 

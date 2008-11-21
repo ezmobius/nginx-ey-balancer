@@ -1,4 +1,4 @@
-NGINX_DIR = "/home/ryan/src/nginx-0.6.32-maxconn-patch" # change me
+NGINX_DIR = "../nginx-0.6.33" # change me
 THIS_DIR  = $(shell pwd)
 
 default: compile
