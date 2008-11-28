@@ -12,9 +12,12 @@
 
 /* 0.5 seconds until a backend SLOT is reset after client half-close */
 #define CLIENT_CLOSURE_SLEEP ((ngx_msec_t)500)  
+#define MAX_QUEUE_LENGTH (1000)
 
 typedef struct {
   ngx_uint_t max_connections;
+  ngx_uint_t max_queue_length;
+  ngx_uint_t queue_length;
   ngx_queue_t waiting_requests;
   ngx_array_t *backends; /* backend servers */
   ngx_event_t queue_check_event;
@@ -128,7 +131,7 @@ queue_oldest (max_connections_srv_conf_t *maxconn_cf)
   return peer_data;
 }
 
-static int
+static ngx_int_t
 queue_remove (max_connections_peer_data_t *peer_data)
 {
   max_connections_srv_conf_t *maxconn_cf = peer_data->maxconn_cf;
@@ -141,6 +144,10 @@ queue_remove (max_connections_peer_data_t *peer_data)
 
   ngx_queue_remove(&peer_data->queue);
   peer_data->queue.prev = peer_data->queue.next = NULL; 
+
+  maxconn_cf->queue_length -= 1;
+  assert(maxconn_cf->queue_length == queue_size(peer_data->maxconn_cf));
+
   ngx_log_debug1( NGX_LOG_DEBUG_HTTP
                 , peer_data->r->connection->log
                 , 0
@@ -177,28 +184,37 @@ queue_shift (max_connections_srv_conf_t *maxconn_cf)
     return NULL;
   max_connections_peer_data_t *peer_data = queue_oldest (maxconn_cf);
 
-  int r = queue_remove (peer_data);
+  ngx_int_t r = queue_remove (peer_data);
   assert(r == 1);
 
   return peer_data;
 }
 
 /* adds a request to the end of the queue */
-static void
+static ngx_int_t
 queue_push (max_connections_srv_conf_t *maxconn_cf, max_connections_peer_data_t *peer_data)
 {
+  if(maxconn_cf->queue_length >= maxconn_cf->max_queue_length)
+    return NGX_ERROR;
+
   /* if this is the first element ensure we set the queue_check_event */
   if(ngx_queue_empty(&maxconn_cf->waiting_requests)) {
     assert(!maxconn_cf->queue_check_event.timer_set);
     ngx_add_timer((&maxconn_cf->queue_check_event), maxconn_cf->queue_timeout); 
   }
   ngx_queue_insert_head(&maxconn_cf->waiting_requests, &peer_data->queue);
+
+  maxconn_cf->queue_length += 1;
+  assert(maxconn_cf->queue_length == queue_size(peer_data->maxconn_cf));
+  assert(maxconn_cf->max_queue_length >=  maxconn_cf->queue_length);
+
   ngx_log_debug1( NGX_LOG_DEBUG_HTTP
                 , peer_data->r->connection->log
                 , 0
                 , "max_connections add queue (new size %ui)"
                 , queue_size(maxconn_cf)
                 );
+  return NGX_OK;
 }
 
 /* This function selects an open backend. It simply iterates through the
@@ -349,6 +365,9 @@ peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t state)
   max_connections_backend_t *backend = peer_data->backend;
   max_connections_srv_conf_t *maxconn_cf = peer_data->maxconn_cf;
 
+  assert(maxconn_cf->queue_length == queue_size(peer_data->maxconn_cf));
+  assert(maxconn_cf->max_queue_length >= maxconn_cf->queue_length);
+
   /* This happens when a client closes their connection before the request
    * is completed */
   if(peer_data->r->connection->error) {
@@ -482,8 +501,11 @@ peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *uscf)
   r->upstream->peer.tries = maxconn_cf->backends->nelts;
   r->upstream->peer.data  = peer_data;
 
-  queue_push(maxconn_cf, peer_data);
+  if(queue_push(maxconn_cf, peer_data) == NGX_ERROR)
+    return NGX_ERROR;
+
   dispatch(peer_data->maxconn_cf);
+
   return NGX_BUSY;
 }
 
@@ -600,6 +622,8 @@ max_connections_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_conf_upstream_srv_conf(uscf, max_connections_module);
   /* 2. set the number of max_connections */
   maxconn_cf->max_connections = (ngx_uint_t)max_connections;
+  maxconn_cf->queue_length = 0;
+  maxconn_cf->max_queue_length = MAX_QUEUE_LENGTH; 
 
   return NGX_CONF_OK;
 }
