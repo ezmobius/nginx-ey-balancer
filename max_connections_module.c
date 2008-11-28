@@ -70,7 +70,7 @@ static ngx_command_t  max_connections_commands[] =
   , NGX_HTTP_UPS_CONF|NGX_CONF_TAKE1
   , max_connections_queue_timeout_command
   , 0
-  , offsetof(max_connections_srv_conf_t, queue_timeout)
+  , 0
   , NULL
   }
 , ngx_null_command
@@ -201,10 +201,10 @@ queue_push (max_connections_srv_conf_t *maxconn_cf, max_connections_peer_data_t 
                 );
 }
 
-/* This is function selects an open backend. It simply iterates through the
+/* This function selects an open backend. It simply iterates through the
  * backends looking for the one with the least connections. */
 static max_connections_backend_t*
-max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, int forced)
+find_upstream (max_connections_srv_conf_t *maxconn_cf, int forced)
 {
 #define MAXCONN_BIGNUM 999999
   ngx_uint_t c
@@ -256,9 +256,9 @@ max_connections_find_open_upstream (max_connections_srv_conf_t *maxconn_cf, int 
 
 /* Returns true if there are no slots to send a request to. */
 #define upstreams_are_all_occupied(maxconn_cf) \
-  (max_connections_find_open_upstream (maxconn_cf, 0) == NULL)
+  (find_upstream (maxconn_cf, 0) == NULL)
 #define upstreams_are_all_dead(maxconn_cf) \
-  (max_connections_find_open_upstream (maxconn_cf, 1) == NULL)
+  (find_upstream (maxconn_cf, 1) == NULL)
 
 /* This function takes the oldest request on the queue
  * (maxconn_cf->waiting_requests) and dispatches it to the backends.  This
@@ -440,9 +440,8 @@ peer_get (ngx_peer_connection_t *pc, void *data)
   assert(peer_data->queue.prev == NULL && "should not be in the queue");
 
   max_connections_backend_t *backend = 
-    max_connections_find_open_upstream(maxconn_cf, peer_data->really_needs_backend);
+    find_upstream(maxconn_cf, peer_data->really_needs_backend);
   assert(backend != NULL && "should always be an availible backend in peer_get()");
-  //assert(backend->connections < maxconn_cf->max_connections);
   assert(peer_data->backend == NULL);
 
   peer_data->backend = backend;
