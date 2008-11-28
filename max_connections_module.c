@@ -12,7 +12,6 @@
 
 /* 0.5 seconds until a backend SLOT is reset after client half-close */
 #define CLIENT_CLOSURE_SLEEP ((ngx_msec_t)500)  
-#define MAX_QUEUE_LENGTH (1000)
 
 typedef struct {
   ngx_uint_t max_connections;
@@ -57,6 +56,7 @@ static ngx_uint_t max_connections_rr_index;
 /* forward declarations */
 static char * max_connections_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char * max_connections_queue_timeout_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static char * max_connections_max_queue_length_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static void * max_connections_create_conf(ngx_conf_t *cf);
 
 #define RAMP(x) (x > 0 ? x : 0)
@@ -72,6 +72,13 @@ static ngx_command_t  max_connections_commands[] =
 , { ngx_string("max_connections_queue_timeout")
   , NGX_HTTP_UPS_CONF|NGX_CONF_TAKE1
   , max_connections_queue_timeout_command
+  , 0
+  , 0
+  , NULL
+  }
+, { ngx_string("max_connections_max_queue_length")
+  , NGX_HTTP_UPS_CONF|NGX_CONF_TAKE1
+  , max_connections_max_queue_length_command
   , 0
   , 0
   , NULL
@@ -296,10 +303,11 @@ dispatch (max_connections_srv_conf_t *maxconn_cf)
   assert(!r->connection->error);
   assert(peer_data->backend == NULL);
 
-  ngx_log_debug2( NGX_LOG_DEBUG_HTTP
+  ngx_log_debug3( NGX_LOG_DEBUG_HTTP
                 , r->connection->log
                 , 0
-                , "max_connections dispatch (queue timeout: %ui, maxconn: %ui)"
+                , "max_connections dispatch (max_queue_length: %ui, queue timeout: %ui, maxconn: %ui)"
+                , maxconn_cf->max_queue_length
                 , maxconn_cf->queue_timeout
                 , maxconn_cf->max_connections
                 );
@@ -569,6 +577,11 @@ max_connections_init(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *uscf)
   return NGX_OK;
 }
 
+/* TODO This function is probably not neccesary. Nginx provides a means of
+ * easily setting scalar time values with ngx_conf_set_msec_slot() in the
+ * ngx_command_t structure. I couldn't manage to make it work, not knowing
+ * what I should be using for the two offset parameters. 
+ */ 
 static char *
 max_connections_queue_timeout_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -592,6 +605,27 @@ max_connections_queue_timeout_command (ngx_conf_t *cf, ngx_command_t *cmd, void 
   }
 
   maxconn_cf->queue_timeout = ms;
+
+  return NGX_CONF_OK;
+}
+
+/* TODO same as above */
+static char *
+max_connections_max_queue_length_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+  ngx_http_upstream_srv_conf_t *uscf = 
+    ngx_http_conf_get_module_srv_conf(cf, ngx_http_upstream_module);
+
+  max_connections_srv_conf_t *maxconn_cf = 
+    ngx_http_conf_upstream_srv_conf(uscf, max_connections_module);
+
+  ngx_str_t *value = cf->args->elts;    
+  ngx_int_t n = ngx_atoi(value[1].data, value[1].len);
+  if (n == NGX_ERROR) {
+    return "invalid number";        
+  }
+
+  maxconn_cf->max_queue_length = n;
 
   return NGX_CONF_OK;
 }
@@ -623,7 +657,6 @@ max_connections_command (ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
   /* 2. set the number of max_connections */
   maxconn_cf->max_connections = (ngx_uint_t)max_connections;
   maxconn_cf->queue_length = 0;
-  maxconn_cf->max_queue_length = MAX_QUEUE_LENGTH; 
 
   return NGX_CONF_OK;
 }
@@ -637,7 +670,8 @@ max_connections_create_conf(ngx_conf_t *cf)
     if (conf == NULL) return NGX_CONF_ERROR;
     max_connections_rr_index = 0;
     conf->max_connections = 1;
-    conf->queue_timeout = 1000;  /* default queue timeout 5 seconds */
+    conf->max_queue_length = 10000; /* default max queue length 10000 */
+    conf->queue_timeout = 10000;  /* default queue timeout 10 seconds */
     return conf;
 }
 

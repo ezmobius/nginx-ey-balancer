@@ -375,6 +375,10 @@ module MaxconnTest
       @options[:queue_timeout]
     end
 
+    def max_queue_length
+      @options[:max_queue_length]
+    end
+
     def fail_timeout
       @options[:backend_timeouts] || 10
     end

@@ -15,6 +15,9 @@ http {
     <% if queue_timeout %>
     max_connections_queue_timeout <%= queue_timeout %>;
     <% end %>
+    <% if max_queue_length %>
+    max_connections_max_queue_length <%= max_queue_length %>;
+    <% end %>
   <% end %>
   }
 
