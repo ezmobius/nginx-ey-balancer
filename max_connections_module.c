@@ -155,7 +155,7 @@ queue_remove (max_connections_peer_data_t *peer_data)
   maxconn_cf->queue_length -= 1;
   assert(maxconn_cf->queue_length == queue_size(peer_data->maxconn_cf));
 
-  ngx_log_debug1( NGX_LOG_DEBUG_HTTP
+  ngx_log_error( NGX_LOG_INFO
                 , peer_data->r->connection->log
                 , 0
                 , "max_connections del queue (new size %ui)"
@@ -215,7 +215,7 @@ queue_push (max_connections_srv_conf_t *maxconn_cf, max_connections_peer_data_t 
   assert(maxconn_cf->queue_length == queue_size(peer_data->maxconn_cf));
   assert(maxconn_cf->max_queue_length >=  maxconn_cf->queue_length);
 
-  ngx_log_debug1( NGX_LOG_DEBUG_HTTP
+  ngx_log_error( NGX_LOG_INFO
                 , peer_data->r->connection->log
                 , 0
                 , "max_connections add queue (new size %ui)"
@@ -303,7 +303,7 @@ dispatch (max_connections_srv_conf_t *maxconn_cf)
   assert(!r->connection->error);
   assert(peer_data->backend == NULL);
 
-  ngx_log_debug3( NGX_LOG_DEBUG_HTTP
+  ngx_log_error( NGX_LOG_INFO
                 , r->connection->log
                 , 0
                 , "max_connections dispatch (max_queue_length: %ui, queue timeout: %ui, maxconn: %ui)"
@@ -344,12 +344,12 @@ queue_check_event(ngx_event_t *ev)
   {
     max_connections_peer_data_t *peer_data = queue_shift(maxconn_cf);
     assert(peer_data == oldest);
-    ngx_log_debug0( NGX_LOG_DEBUG_HTTP
+    ngx_log_error( NGX_LOG_INFO
                   , peer_data->r->connection->log
                   , 0
                   , "max_connections expire"
                   );
-    ngx_http_finalize_request(peer_data->r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+    ngx_http_finalize_request(peer_data->r, NGX_HTTP_QUEUE_EXPIRATION);
   }
 
   /* try to dispatch some requets */
@@ -406,7 +406,7 @@ peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t state)
   if(backend) {
     assert(backend->connections > 0);
     backend->connections--; /* free the slot */
-    ngx_log_debug2( NGX_LOG_DEBUG_HTTP
+    ngx_log_error( NGX_LOG_INFO
                   , peer_data->r->connection->log
                   , 0
                   , "max_connections recv client from %V (now %ui connections)"
@@ -420,7 +420,7 @@ peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t state)
    * error (state & NGX_PEER_NEXT) 
    */ 
   if(state & NGX_PEER_FAILED) {
-    ngx_log_debug1( NGX_LOG_DEBUG_HTTP
+    ngx_log_error( NGX_LOG_INFO
                   , pc->log
                   , 0
                   , "max_connections %V failed "
@@ -435,7 +435,7 @@ peer_free (ngx_peer_connection_t *pc, void *data, ngx_uint_t state)
 
     if(upstreams_are_all_dead(maxconn_cf)) {
       pc->tries = 0; /* kill this request */
-      ngx_log_debug0( NGX_LOG_DEBUG_HTTP
+      ngx_log_error( NGX_LOG_INFO
                     , pc->log
                     , 0
                     , "max_connections all backends are dead. killing request."
@@ -478,7 +478,7 @@ peer_get (ngx_peer_connection_t *pc, void *data)
   pc->socklen  = backend->socklen;
   pc->name     = backend->name;
 
-  ngx_log_debug2( NGX_LOG_DEBUG_HTTP
+  ngx_log_error( NGX_LOG_INFO
                 , pc->log
                 , 0
                 , "max_connections sending client to %V (now %ui connections)"
@@ -520,7 +520,7 @@ peer_init (ngx_http_request_t *r, ngx_http_upstream_srv_conf_t *uscf)
 static ngx_int_t
 max_connections_init(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *uscf)
 {
-  ngx_log_debug0( NGX_LOG_DEBUG_HTTP
+  ngx_log_error( NGX_LOG_INFO
                 , cf->log
                 , 0
                 , "max_connections_init"
