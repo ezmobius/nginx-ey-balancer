@@ -1,7 +1,6 @@
-diff --git a/src/http/ngx_http_request.h b/src/http/ngx_http_request.h
-index 1a4eae1..359fb5e 100644
---- a/src/http/ngx_http_request.h
-+++ b/src/http/ngx_http_request.h
+diff -Naur ../nginx-0.6.34/src/http/ngx_http_request.h src/http/ngx_http_request.h
+--- ../nginx-0.6.34/src/http/ngx_http_request.h	2008-11-27 15:22:34.000000000 +0100
++++ src/http/ngx_http_request.h	2009-01-22 12:50:27.000000000 +0100
 @@ -119,6 +119,7 @@
  #define NGX_HTTP_GATEWAY_TIME_OUT          504
  #define NGX_HTTP_INSUFFICIENT_STORAGE      507
@@ -10,11 +9,10 @@ index 1a4eae1..359fb5e 100644
  
  #define NGX_HTTP_LOWLEVEL_BUFFERED         0xf0
  #define NGX_HTTP_WRITE_BUFFERED            0x10
-diff --git a/src/http/ngx_http_upstream.c b/src/http/ngx_http_upstream.c
-index 3f77c03..eafb606 100644
---- a/src/http/ngx_http_upstream.c
-+++ b/src/http/ngx_http_upstream.c
-@@ -14,8 +14,6 @@ static void ngx_http_upstream_rd_check_broken_connection(ngx_http_request_t *r);
+diff -Naur ../nginx-0.6.34/src/http/ngx_http_upstream.c src/http/ngx_http_upstream.c
+--- ../nginx-0.6.34/src/http/ngx_http_upstream.c	2008-11-27 15:31:44.000000000 +0100
++++ src/http/ngx_http_upstream.c	2009-01-22 12:50:37.000000000 +0100
+@@ -14,8 +14,6 @@
  static void ngx_http_upstream_wr_check_broken_connection(ngx_http_request_t *r);
  static void ngx_http_upstream_check_broken_connection(ngx_http_request_t *r,
      ngx_event_t *ev);
@@ -23,7 +21,7 @@ index 3f77c03..eafb606 100644
  static ngx_int_t ngx_http_upstream_reinit(ngx_http_request_t *r,
      ngx_http_upstream_t *u);
  static void ngx_http_upstream_send_request(ngx_http_request_t *r,
-@@ -435,12 +433,12 @@ ngx_http_upstream_init(ngx_http_request_t *r)
+@@ -435,12 +433,12 @@
  
  found:
  
@@ -41,7 +39,7 @@ index 3f77c03..eafb606 100644
  }
  
  
-@@ -534,9 +532,12 @@ ngx_http_upstream_check_broken_connection(ngx_http_request_t *r,
+@@ -534,9 +532,12 @@
          return;
      }
  
@@ -54,7 +52,7 @@ index 3f77c03..eafb606 100644
  
  #if (NGX_HAVE_KQUEUE)
  
-@@ -639,7 +640,7 @@ ngx_http_upstream_check_broken_connection(ngx_http_request_t *r,
+@@ -639,7 +640,7 @@
  }
  
  
@@ -63,11 +61,10 @@ index 3f77c03..eafb606 100644
  ngx_http_upstream_connect(ngx_http_request_t *r, ngx_http_upstream_t *u)
  {
      ngx_int_t          rc;
-diff --git a/src/http/ngx_http_upstream.h b/src/http/ngx_http_upstream.h
-index 2ed2797..c73d136 100644
---- a/src/http/ngx_http_upstream.h
-+++ b/src/http/ngx_http_upstream.h
-@@ -270,6 +270,7 @@ ngx_int_t ngx_http_upstream_header_variable(ngx_http_request_t *r,
+diff -Naur ../nginx-0.6.34/src/http/ngx_http_upstream.h src/http/ngx_http_upstream.h
+--- ../nginx-0.6.34/src/http/ngx_http_upstream.h	2008-03-03 21:04:06.000000000 +0100
++++ src/http/ngx_http_upstream.h	2009-01-22 12:50:55.000000000 +0100
+@@ -270,6 +270,7 @@
      ngx_http_variable_value_t *v, uintptr_t data);
  
  void ngx_http_upstream_init(ngx_http_request_t *r);
