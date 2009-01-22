@@ -1,11 +1,18 @@
+haproxy maxconn for nginx
+Adds a request queue to Nginx that allows the limiting of concurrent requests
+passed to the upstream.  "max_connections N;" in an upstream directive means
+that each upstream server will be given N request at a time, per Nginx
+worker. For example, if you have two workers and "max_connections 1;" then
+there will be a total of 2 requests at a time on each upstream server.
 
 Usage:
 
   upstream mongrels {
     server 127.0.0.1:8001;
     server 127.0.0.1:8002;
-    max_connections 2;
-    max_connections_queue_timeout 2s; # optional defaults to 1s
+    max_connections 1;
+    max_connections_queue_timeout 2s; # optional defaults to 10s
+    max_connections_max_queue_length 50; # optional defaults to 10000
   }
 
 Install:
